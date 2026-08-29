@@ -1,6 +1,6 @@
 --[[
-    NEXO E — MM2 Suite (Optimized)
-    Fixed: Silent Aim lag (caching + distance filter)
+    NEXO E — MM2 Suite
+    Fixed: Universal Silent Aim (PC + Mobile) via Camera Raycast hook
 ]]
 
 local Players = game:GetService("Players")
@@ -225,8 +225,11 @@ local function updateESP()
     end
 end
 
--- ─── GUN SILENT AIM (OTIMIZADO) ───────────────────────────────
-local oldNamecall
+-- ─── GUN SILENT AIM (PC + MOBILE FIX) ─────────────────────────
+local mt = getrawmetatable(game)
+local oldNamecall = mt.__namecall
+setreadonly(mt, false)
+
 local cachedMurderer = nil
 local lastMurdererCheck = 0
 
@@ -239,35 +242,37 @@ local function getMurdererOptimized()
     return cachedMurderer
 end
 
-if hookmetamethod then
-    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        local method = getnamecallmethod()
-        if state.silentAim and method and (method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRay" or method == "FindPartOnRayWithWhitelist" or method == "Raycast") then
-            local localChar = LocalPlayer.Character
-            if localChar then
+mt.__namecall = newcclosure(function(self, ...)
+    local method = getnamecallmethod()
+    if state.silentAim and method and (method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRay" or method == "FindPartOnRayWithWhitelist" or method == "Raycast") then
+        if not checkcaller() then
+            local char = LocalPlayer.Character
+            if char then
                 local hasGun = false
-                for _, t in ipairs(localChar:GetChildren()) do
+                for _, t in ipairs(char:GetChildren()) do
                     if t:IsA("Tool") and t.Name:lower():match("gun") then hasGun = true break end
                 end
                 
-                if hasGun and not checkcaller() then
+                if hasGun then
                     local murderer = getMurdererOptimized()
                     if murderer and murderer.Character then
                         local target = murderer.Character:FindFirstChild("Head") or murderer.Character:FindFirstChild("HumanoidRootPart")
                         if target then
                             local args = {...}
+                            local cam = Workspace.CurrentCamera
+                            
                             if method == "Raycast" then
                                 local origin = args[1]
-                                local myHrp = localChar:FindFirstChild("HumanoidRootPart")
-                                if origin and myHrp and (origin - myHrp.Position).Magnitude < 10 then
+                                -- FILTRO: só redireciona se o raycast vier da câmera (tiro). isso impede de quebrar o movimento.
+                                if origin and (origin - cam.CFrame.Position).Magnitude < 5 then
                                     args[2] = (target.Position - origin).Unit * 3000
                                     return oldNamecall(self, unpack(args))
                                 end
                             else
                                 local ray = args[1]
                                 if typeof(ray) == "Ray" then
-                                    local myHrp = localChar:FindFirstChild("HumanoidRootPart")
-                                    if ray.Origin and myHrp and (ray.Origin - myHrp.Position).Magnitude < 10 then
+                                    -- FILTRO: mesma coisa aqui
+                                    if ray.Origin and (ray.Origin - cam.CFrame.Position).Magnitude < 5 then
                                         args[1] = Ray.new(ray.Origin, (target.Position - ray.Origin).Unit * 3000)
                                         return oldNamecall(self, unpack(args))
                                     end
@@ -278,39 +283,11 @@ if hookmetamethod then
                 end
             end
         end
-        return oldNamecall(self, ...)
-    end)
-elseif hookfunction then
-    local oldRaycast = Workspace.Raycast
-    oldNamecall = hookfunction(oldRaycast, function(self, ...)
-        if state.silentAim then
-            local localChar = LocalPlayer.Character
-            if localChar then
-                local hasGun = false
-                for _, t in ipairs(localChar:GetChildren()) do
-                    if t:IsA("Tool") and t.Name:lower():match("gun") then hasGun = true break end
-                end
-                
-                if hasGun and not checkcaller() then
-                    local args = {...}
-                    local origin = args[1]
-                    local myHrp = localChar:FindFirstChild("HumanoidRootPart")
-                    if origin and myHrp and (origin - myHrp.Position).Magnitude < 10 then
-                        local murderer = getMurdererOptimized()
-                        if murderer and murderer.Character then
-                            local target = murderer.Character:FindFirstChild("Head") or murderer.Character:FindFirstChild("HumanoidRootPart")
-                            if target then
-                                args[2] = (target.Position - origin).Unit * 3000
-                                return oldRaycast(self, unpack(args))
-                            end
-                        end
-                    end
-                end
-            end
-        end
-        return oldRaycast(self, ...)
-    end)
-end
+    end
+    return oldNamecall(self, ...)
+end)
+
+setreadonly(mt, true)
 
 -- ─── FEATURE FUNCTIONS ────────────────────────────────────────
 local function toggleKnifeAim(on)
