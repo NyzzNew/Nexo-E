@@ -1,6 +1,6 @@
 --[[
-    NEXO E — MM2 Suite
-    Fixed: Mobile & PC support (TextButton containers), close button, drag
+    NEXO E — MM2 Suite (Modern UI)
+    Sidebar layout, drop shadow, sleek toggles, glowing float button
 ]]
 
 local Players = game:GetService("Players")
@@ -23,9 +23,7 @@ end
 local function randomName()
     local chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     local s = ""
-    for i = 1, math.random(8, 16) do
-        s = s .. chars:sub(math.random(1, #chars), math.random(1, #chars))
-    end
+    for i = 1, math.random(8, 16) do s = s .. chars:sub(math.random(1, #chars), math.random(1, #chars)) end
     return s
 end
 
@@ -41,11 +39,12 @@ end
 local ACCENT = Color3.fromRGB(150, 80, 255)
 local ACCENT_LIGHT = Color3.fromRGB(200, 120, 255)
 local ACCENT_DIM = Color3.fromRGB(45, 30, 65)
-local BG = Color3.fromRGB(15, 15, 18)
-local BG_CARD = Color3.fromRGB(24, 24, 30)
-local BG_HOVER = Color3.fromRGB(34, 34, 42)
+local BG = Color3.fromRGB(20, 20, 25)
+local BG_SIDE = Color3.fromRGB(15, 15, 20)
+local BG_CARD = Color3.fromRGB(30, 30, 38)
+local BG_HOVER = Color3.fromRGB(40, 40, 50)
 local TEXT = Color3.fromRGB(240, 240, 250)
-local TEXT_DIM = Color3.fromRGB(130, 130, 145)
+local TEXT_DIM = Color3.fromRGB(140, 140, 155)
 local TOGGLE_OFF = Color3.fromRGB(50, 50, 60)
 local DANGER = Color3.fromRGB(255, 80, 100)
 
@@ -63,6 +62,7 @@ local function padding(parent, top, bottom, left, right)
 end
 
 -- ─── ESTADO ───────────────────────────────────────────────────
+local scriptRunning = true
 local state = {
     esp = false, tracers = false, fly = false, noclip = false,
     speed = false, coinFarm = false, silentAim = false, knifeAim = false,
@@ -156,6 +156,10 @@ local function updateESP()
     if not state.esp then clearESP() end
     if not state.tracers then clearTracers() end
     if not state.esp and not state.tracers then return end
+    
+    local myHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local cam = Workspace.CurrentCamera
+    
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character then
             local hrp = p.Character:FindFirstChild("HumanoidRootPart")
@@ -163,6 +167,7 @@ local function updateESP()
             if hrp and hum and hum.Health > 0 then
                 local role = getRole(p)
                 local col = roleColors[role] or Color3.new(1,1,1)
+                
                 if state.esp then
                     if not espObjects[p] or not espObjects[p].hl or not espObjects[p].hl.Parent then
                         if espObjects[p] then
@@ -185,12 +190,11 @@ local function updateESP()
                     end
                     local e = espObjects[p]
                     e.hl.FillColor = col; e.hl.OutlineColor = col; e.hl.Parent = p.Character; e.tag.Parent = hrp
-                    local myHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                     local dist = myHrp and math.floor((hrp.Position - myHrp.Position).Magnitude) or 0
                     e.lbl.Text = p.Name .. "  " .. role .. "  " .. dist .. "m"; e.lbl.TextColor3 = col
                 end
+                
                 if state.tracers then
-                    local cam = Workspace.CurrentCamera
                     if not tracerObjects[p] or not tracerObjects[p].Parent then
                         local line = Instance.new("Frame")
                         line.Name = randomName()
@@ -534,6 +538,56 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.Parent = getProtectedParent()
 
+-- ─── FLOATING BUTTON ──────────────────────────────────────────
+local FloatBtn = Instance.new("TextButton")
+FloatBtn.Name = randomName()
+FloatBtn.Size = UDim2.new(0, 45, 0, 45)
+FloatBtn.Position = UDim2.new(0, 20, 0.5, -22)
+FloatBtn.BackgroundColor3 = BG_SIDE
+FloatBtn.Text = "N"
+FloatBtn.TextColor3 = ACCENT_LIGHT
+FloatBtn.Font = Enum.Font.GothamBlack
+FloatBtn.TextSize = 20
+FloatBtn.Visible = false
+FloatBtn.Parent = ScreenGui
+corner(FloatBtn, 25)
+local floatStroke = stroke(FloatBtn, ACCENT, 1.5, 0.2)
+
+-- float glow
+local FloatGlow = Instance.new("Frame")
+FloatGlow.Name = randomName()
+FloatGlow.Size = UDim2.new(1, 20, 1, 20)
+FloatGlow.Position = UDim2.new(0, -10, 0, -10)
+FloatGlow.BackgroundColor3 = ACCENT
+FloatGlow.BackgroundTransparency = 0.95
+FloatGlow.BorderSizePixel = 0
+FloatGlow.Visible = false
+FloatGlow.Parent = FloatBtn
+corner(FloatGlow, 30)
+
+-- drag float button
+do
+    local dragging, dragStart, startPos
+    FloatBtn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; dragStart = input.Position; startPos = FloatBtn.Position
+            TweenService:Create(FloatBtn, TweenInfo.new(0.2), {BackgroundColor3 = BG_CARD}):Play()
+        end
+    end)
+    FloatBtn.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+            TweenService:Create(FloatBtn, TweenInfo.new(0.2), {BackgroundColor3 = BG_SIDE}):Play()
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            FloatBtn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+end
+
 -- ─── LOADING SCREEN ───────────────────────────────────────────
 local LoadFrame = Instance.new("Frame")
 LoadFrame.Name = randomName()
@@ -621,19 +675,30 @@ LoadSubtext.TextSize = 10
 LoadSubtext.TextXAlignment = Enum.TextXAlignment.Left
 LoadSubtext.Parent = LoadFrame
 
--- ─── MAIN FRAME (hidden until loaded) ─────────────────────────
+-- ─── DROP SHADOW & MAIN FRAME ─────────────────────────────────
+local MainShadow = Instance.new("Frame")
+MainShadow.Name = randomName()
+MainShadow.Size = UDim2.new(0, 500, 0, 380)
+MainShadow.Position = UDim2.new(0.5, -250, 0.5, -190)
+MainShadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+MainShadow.BackgroundTransparency = 0.5
+MainShadow.BorderSizePixel = 0
+MainShadow.Visible = false
+MainShadow.Parent = ScreenGui
+corner(MainShadow, 16)
+
 local Main = Instance.new("Frame")
 Main.Name = randomName()
-Main.Size = UDim2.new(0, 420, 0, 440)
-Main.Position = UDim2.new(0.5, -210, 0.5, -220)
+Main.Size = UDim2.new(0, 480, 0, 360)
+Main.Position = UDim2.new(0.5, -240, 0.5, -180)
 Main.BackgroundColor3 = BG
 Main.BorderSizePixel = 0
 Main.Visible = false
 Main.Parent = ScreenGui
-corner(Main, 14)
+corner(Main, 12)
 stroke(Main, ACCENT_DIM, 1, 0.1)
 
--- drag (PC + Mobile)
+-- drag main
 do
     local dragging, dragStart, startPos
     Main.InputBegan:Connect(function(input)
@@ -650,98 +715,49 @@ do
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             local delta = input.Position - dragStart
             Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            MainShadow.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X + 5, startPos.Y.Scale, startPos.Y.Offset + delta.Y + 5)
         end
     end)
 end
 
--- ─── HEADER ───────────────────────────────────────────────────
-local Header = Instance.new("Frame")
-Header.Name = randomName()
-Header.Size = UDim2.new(1, 0, 0, 50)
-Header.BackgroundColor3 = Color3.fromRGB(12, 12, 16)
-Header.BorderSizePixel = 0
-Header.Parent = Main
-corner(Header, 14)
+-- ─── SIDEBAR ──────────────────────────────────────────────────
+local Sidebar = Instance.new("Frame")
+Sidebar.Name = randomName()
+Sidebar.Size = UDim2.new(0, 120, 1, 0)
+Sidebar.BackgroundColor3 = BG_SIDE
+Sidebar.BorderSizePixel = 0
+Sidebar.Parent = Main
+corner(Sidebar, 12)
 
-local headerBottom = Instance.new("Frame")
-headerBottom.Name = randomName()
-headerBottom.Size = UDim2.new(1, -24, 0, 1)
-headerBottom.Position = UDim2.new(0, 12, 1, -1)
-headerBottom.BackgroundColor3 = ACCENT
-headerBottom.BackgroundTransparency = 0.5
-headerBottom.BorderSizePixel = 0
-headerBottom.Parent = Header
-
-local Title = Instance.new("TextLabel")
-Title.Name = randomName()
-Title.Size = UDim2.new(1, -60, 1, 0)
-Title.Position = UDim2.new(0, 16, 0, 0)
-Title.BackgroundTransparency = 1
-Title.Text = "NEXO E"
-Title.TextColor3 = TEXT
-Title.Font = Enum.Font.GothamBlack
-Title.TextSize = 17
-Title.TextXAlignment = Enum.TextXAlignment.Left
-Title.Parent = Header
-gradient(Title, ACCENT_LIGHT, ACCENT, 0)
-
-local subtitle = Instance.new("TextLabel")
-subtitle.Name = randomName()
-subtitle.Size = UDim2.new(0, 60, 1, 0)
-subtitle.Position = UDim2.new(1, -70, 0, 0)
-subtitle.BackgroundTransparency = 1
-subtitle.Text = "v1.0"
-subtitle.TextColor3 = TEXT_DIM
-subtitle.Font = Enum.Font.GothamMedium
-subtitle.TextSize = 11
-subtitle.TextXAlignment = Enum.TextXAlignment.Right
-subtitle.Parent = Header
-
--- ─── TAB BAR ──────────────────────────────────────────────────
-local TabBar = Instance.new("Frame")
-TabBar.Name = randomName()
-TabBar.Size = UDim2.new(1, -24, 0, 36)
-TabBar.Position = UDim2.new(0, 12, 0, 58)
-TabBar.BackgroundTransparency = 1
-TabBar.Parent = Main
+local SideTitle = Instance.new("TextLabel")
+SideTitle.Name = randomName()
+SideTitle.Size = UDim2.new(1, 0, 0, 50)
+SideTitle.BackgroundTransparency = 1
+SideTitle.Text = "NEXO E"
+SideTitle.TextColor3 = TEXT
+SideTitle.Font = Enum.Font.GothamBlack
+SideTitle.TextSize = 16
+SideTitle.Parent = Sidebar
+gradient(SideTitle, ACCENT_LIGHT, ACCENT, 0)
 
 local tabs = {"Combat", "Visuals", "Player", "Misc"}
 local tabButtons = {}
 local tabPages = {}
 
-local tabLayout = Instance.new("UIListLayout")
-tabLayout.FillDirection = Enum.FillDirection.Horizontal
-tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-tabLayout.Padding = UDim.new(0, 6)
-tabLayout.Parent = TabBar
-
 for i, name in ipairs(tabs) do
     local tabBtn = Instance.new("TextButton")
     tabBtn.Name = randomName()
-    tabBtn.Size = UDim2.new(0.24, -4, 1, 0)
+    tabBtn.Size = UDim2.new(1, -20, 0, 32)
+    tabBtn.Position = UDim2.new(0, 10, 0, 60 + (i-1)*40)
     tabBtn.BackgroundColor3 = BG_CARD
     tabBtn.BorderSizePixel = 0
     tabBtn.Text = name
     tabBtn.TextColor3 = TEXT_DIM
     tabBtn.Font = Enum.Font.GothamBold
     tabBtn.TextSize = 12
-    corner(tabBtn, 8)
-    tabBtn.Parent = TabBar
-
-    tabBtn.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement then
-            if tabButtons.current ~= name then
-                TweenService:Create(tabBtn, TweenInfo.new(0.15), {BackgroundColor3 = BG_HOVER}):Play()
-            end
-        end
-    end)
-    tabBtn.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement then
-            if tabButtons.current ~= name then
-                TweenService:Create(tabBtn, TweenInfo.new(0.15), {BackgroundColor3 = BG_CARD}):Play()
-            end
-        end
-    end)
+    tabBtn.AutoButtonColor = false
+    corner(tabBtn, 6)
+    tabBtn.Parent = Sidebar
 
     tabBtn.MouseButton1Click:Connect(function()
         for _, btn in pairs(tabButtons) do
@@ -759,8 +775,8 @@ for i, name in ipairs(tabs) do
 
     local page = Instance.new("ScrollingFrame")
     page.Name = randomName()
-    page.Size = UDim2.new(1, -24, 1, -110)
-    page.Position = UDim2.new(0, 12, 0, 100)
+    page.Size = UDim2.new(1, -140, 1, -20)
+    page.Position = UDim2.new(0, 130, 0, 10)
     page.BackgroundTransparency = 1
     page.BorderSizePixel = 0
     page.ScrollBarThickness = 2
@@ -774,96 +790,65 @@ for i, name in ipairs(tabs) do
     pageLayout.Padding = UDim.new(0, 8)
     pageLayout.Parent = page
 
-    padding(page, 4, 4, 0, 4)
+    padding(page, 0, 10, 0, 10)
 
     tabPages[name] = page
     tabButtons[name].page = page
 end
 
--- ─── FOOTER ───────────────────────────────────────────────────
-local Footer = Instance.new("Frame")
-Footer.Name = randomName()
-Footer.Size = UDim2.new(1, 0, 0, 36)
-Footer.Position = UDim2.new(0, 0, 1, -36)
-Footer.BackgroundColor3 = Color3.fromRGB(12, 12, 16)
-Footer.BorderSizePixel = 0
-Footer.Parent = Main
-corner(Footer, 14)
-
-local footerTop = Instance.new("Frame")
-footerTop.Name = randomName()
-footerTop.Size = UDim2.new(1, -24, 0, 1)
-footerTop.Position = UDim2.new(0, 12, 0, 0)
-footerTop.BackgroundColor3 = ACCENT_DIM
-footerTop.BorderSizePixel = 0
-footerTop.Parent = Footer
-
-local credit = Instance.new("TextLabel")
-credit.Name = randomName()
-credit.Size = UDim2.new(1, -24, 1, 0)
-credit.Position = UDim2.new(0, 16, 0, 0)
-credit.BackgroundTransparency = 1
-credit.Text = "NEXO E  //  built for Maker"
-credit.TextColor3 = TEXT_DIM
-credit.Font = Enum.Font.GothamMedium
-credit.TextSize = 10
-credit.TextXAlignment = Enum.TextXAlignment.Left
-credit.Parent = Footer
+-- ─── FOOTER (SIDEBAR) ─────────────────────────────────────────
+local SideFoot = Instance.new("Frame")
+SideFoot.Name = randomName()
+SideFoot.Size = UDim2.new(1, 0, 0, 36)
+SideFoot.Position = UDim2.new(0, 0, 1, -36)
+SideFoot.BackgroundTransparency = 1
+SideFoot.Parent = Sidebar
 
 local closeBtn = Instance.new("TextButton")
 closeBtn.Name = randomName()
-closeBtn.Size = UDim2.new(0, 70, 0, 22)
-closeBtn.Position = UDim2.new(1, -82, 0.5, -11)
+closeBtn.Size = UDim2.new(1, -20, 0, 28)
+closeBtn.Position = UDim2.new(0, 10, 0.5, -14)
 closeBtn.BackgroundColor3 = Color3.fromRGB(40, 20, 25)
 closeBtn.BorderSizePixel = 0
 closeBtn.Text = "Close"
 closeBtn.TextColor3 = DANGER
 closeBtn.Font = Enum.Font.GothamBold
 closeBtn.TextSize = 11
+closeBtn.AutoButtonColor = false
 corner(closeBtn, 6)
-closeBtn.Parent = Footer
+closeBtn.Parent = SideFoot
 
-closeBtn.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement then
-        TweenService:Create(closeBtn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(70, 25, 30)}):Play()
-    end
-end)
-closeBtn.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement then
-        TweenService:Create(closeBtn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(40, 20, 25)}):Play()
-    end
-end)
-
--- CORREÇÃO: Evento de clique do botão close
 closeBtn.MouseButton1Click:Connect(function()
-    clearESP(); clearTracers()
-    for _, conn in pairs({flyConn, noclipConn, coinConn, knifeConn, grabConn, alarmConn, dropConn, antiAfkConn}) do
-        if conn then conn:Disconnect() end
-    end
-    toggleHitbox(false); toggleFullbright(false)
-    if alarmGui then alarmGui:Destroy() end
-    state.silentAim = false
-    ScreenGui:Destroy()
+    Main.Visible = false
+    MainShadow.Visible = false
+    FloatBtn.Visible = true
+    FloatGlow.Visible = true
+end)
+
+FloatBtn.MouseButton1Click:Connect(function()
+    Main.Visible = true
+    MainShadow.Visible = true
+    FloatBtn.Visible = false
+    FloatGlow.Visible = false
 end)
 
 -- ─── TOGGLE FACTORY ───────────────────────────────────────────
--- CORREÇÃO: Usando TextButton em vez de Frame para suportar Mobile/PC
 local function makeToggle(parent, text, callback)
     local container = Instance.new("TextButton")
     container.Name = randomName()
-    container.Size = UDim2.new(1, 0, 0, 40)
+    container.Size = UDim2.new(1, 0, 0, 36)
     container.BackgroundColor3 = BG_CARD
     container.BorderSizePixel = 0
     container.Text = ""
     container.AutoButtonColor = false
     corner(container, 8)
-    local stk = stroke(container, Color3.fromRGB(35, 35, 42), 1, 0)
+    local stk = stroke(container, Color3.fromRGB(40, 40, 50), 1, 0)
     container.Parent = parent
 
     local label = Instance.new("TextLabel")
     label.Name = randomName()
     label.Size = UDim2.new(1, -60, 1, 0)
-    label.Position = UDim2.new(0, 14, 0, 0)
+    label.Position = UDim2.new(0, 12, 0, 0)
     label.BackgroundTransparency = 1
     label.Text = text
     label.TextColor3 = TEXT
@@ -874,20 +859,20 @@ local function makeToggle(parent, text, callback)
 
     local toggleBg = Instance.new("Frame")
     toggleBg.Name = randomName()
-    toggleBg.Size = UDim2.new(0, 40, 0, 20)
-    toggleBg.Position = UDim2.new(1, -52, 0.5, -10)
+    toggleBg.Size = UDim2.new(0, 36, 0, 18)
+    toggleBg.Position = UDim2.new(1, -46, 0.5, -9)
     toggleBg.BackgroundColor3 = TOGGLE_OFF
     toggleBg.BorderSizePixel = 0
-    corner(toggleBg, 10)
+    corner(toggleBg, 9)
     toggleBg.Parent = container
 
     local toggleKnob = Instance.new("Frame")
     toggleKnob.Name = randomName()
-    toggleKnob.Size = UDim2.new(0, 16, 0, 16)
-    toggleKnob.Position = UDim2.new(0, 2, 0.5, -8)
-    toggleKnob.BackgroundColor3 = Color3.fromRGB(100, 100, 110)
+    toggleKnob.Size = UDim2.new(0, 14, 0, 14)
+    toggleKnob.Position = UDim2.new(0, 2, 0.5, -7)
+    toggleKnob.BackgroundColor3 = Color3.fromRGB(120, 120, 130)
     toggleKnob.BorderSizePixel = 0
-    corner(toggleKnob, 8)
+    corner(toggleKnob, 7)
     toggleKnob.Parent = toggleBg
 
     local on = false
@@ -895,14 +880,14 @@ local function makeToggle(parent, text, callback)
         on = not on
         if on then
             TweenService:Create(toggleBg, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {BackgroundColor3 = ACCENT}):Play()
-            TweenService:Create(toggleKnob, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(1, -18, 0.5, -8), BackgroundColor3 = Color3.fromRGB(255, 255, 255)}):Play()
+            TweenService:Create(toggleKnob, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(1, -16, 0.5, -7), BackgroundColor3 = Color3.fromRGB(255, 255, 255)}):Play()
             label.TextColor3 = ACCENT_LIGHT
             stk.Color = ACCENT_DIM
         else
             TweenService:Create(toggleBg, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {BackgroundColor3 = TOGGLE_OFF}):Play()
-            TweenService:Create(toggleKnob, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(0, 2, 0.5, -8), BackgroundColor3 = Color3.fromRGB(100, 100, 110)}):Play()
+            TweenService:Create(toggleKnob, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(0, 2, 0.5, -7), BackgroundColor3 = Color3.fromRGB(120, 120, 130)}):Play()
             label.TextColor3 = TEXT
-            stk.Color = Color3.fromRGB(35, 35, 42)
+            stk.Color = Color3.fromRGB(40, 40, 50)
         end
         callback(on)
     end)
@@ -922,13 +907,14 @@ end
 local function makeAction(parent, text, color, callback)
     local btn = Instance.new("TextButton")
     btn.Name = randomName()
-    btn.Size = UDim2.new(1, 0, 0, 38)
+    btn.Size = UDim2.new(1, 0, 0, 36)
     btn.BackgroundColor3 = BG_CARD
     btn.BorderSizePixel = 0
     btn.Text = text
     btn.TextColor3 = color or TEXT
     btn.Font = Enum.Font.GothamBold
     btn.TextSize = 13
+    btn.AutoButtonColor = false
     corner(btn, 8)
     stroke(btn, color and Color3.new(color.R * 0.3, color.G * 0.3, color.B * 0.3) or ACCENT_DIM, 1, 0)
     btn.Parent = parent
@@ -970,8 +956,19 @@ local loadSteps = {
         makeToggle(tabPages["Player"], "Speed x3", toggleSpeed)
         makeToggle(tabPages["Player"], "Coin Farm", toggleCoinFarm)
     end },
-    { status = "loading misc systems...",          sub = "anti-afk + cleanup", fn = function()
+    { status = "loading misc systems...",          sub = "anti-afk + kill", fn = function()
         makeToggle(tabPages["Misc"], "Anti-AFK", toggleAntiAfk)
+        makeAction(tabPages["Misc"], "Kill Script", DANGER, function()
+            scriptRunning = false
+            clearESP(); clearTracers()
+            for _, conn in pairs({flyConn, noclipConn, coinConn, knifeConn, grabConn, alarmConn, dropConn, antiAfkConn}) do
+                if conn then conn:Disconnect() end
+            end
+            toggleHitbox(false); toggleFullbright(false)
+            if alarmGui then alarmGui:Destroy() end
+            state.silentAim = false
+            ScreenGui:Destroy()
+        end)
     end },
     { status = "finalizing...",                     sub = "ready", fn = function() task.wait(0.2) end },
 }
@@ -1020,14 +1017,15 @@ task.spawn(function()
     fadeOut.Completed:Wait()
     LoadFrame:Destroy()
 
+    MainShadow.Visible = true
     Main.Visible = true
     Main.BackgroundTransparency = 1
     TweenService:Create(Main, TweenInfo.new(0.4, Enum.EasingStyle.Quad), {BackgroundTransparency = 0}):Play()
 end)
 
--- ─── LOOPS ────────────────────────────────────────────────────
+-- ─── LOOPS (PERSISTENT) ───────────────────────────────────────
 task.spawn(function()
-    while ScreenGui.Parent do
+    while scriptRunning do
         updateESP()
         task.wait(0.3)
     end
@@ -1035,6 +1033,7 @@ end)
 
 LocalPlayer.CharacterAdded:Connect(function()
     task.wait(1)
+    if not scriptRunning then return end
     if state.speed then hookWalkSpeed(true, 50) end
     if state.hitbox then toggleHitbox(true) end
 end)
