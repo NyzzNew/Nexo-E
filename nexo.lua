@@ -1,6 +1,6 @@
 --[[
     NEXO E — MM2 Suite
-    Fixed: toggle clicks, close button, visibility
+    Fixed: Mobile & PC support (TextButton containers), close button, drag
 ]]
 
 local Players = game:GetService("Players")
@@ -633,19 +633,21 @@ Main.Parent = ScreenGui
 corner(Main, 14)
 stroke(Main, ACCENT_DIM, 1, 0.1)
 
--- drag
+-- drag (PC + Mobile)
 do
     local dragging, dragStart, startPos
     Main.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true; dragStart = input.Position; startPos = Main.Position
         end
     end)
     Main.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
     end)
     UserInputService.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             local delta = input.Position - dragStart
             Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
         end
@@ -832,14 +834,28 @@ closeBtn.InputEnded:Connect(function(input)
     end
 end)
 
+-- CORREÇÃO: Evento de clique do botão close
+closeBtn.MouseButton1Click:Connect(function()
+    clearESP(); clearTracers()
+    for _, conn in pairs({flyConn, noclipConn, coinConn, knifeConn, grabConn, alarmConn, dropConn, antiAfkConn}) do
+        if conn then conn:Disconnect() end
+    end
+    toggleHitbox(false); toggleFullbright(false)
+    if alarmGui then alarmGui:Destroy() end
+    state.silentAim = false
+    ScreenGui:Destroy()
+end)
+
 -- ─── TOGGLE FACTORY ───────────────────────────────────────────
+-- CORREÇÃO: Usando TextButton em vez de Frame para suportar Mobile/PC
 local function makeToggle(parent, text, callback)
-    local container = Instance.new("Frame")
+    local container = Instance.new("TextButton")
     container.Name = randomName()
     container.Size = UDim2.new(1, 0, 0, 40)
     container.BackgroundColor3 = BG_CARD
     container.BorderSizePixel = 0
-    container.Active = true -- CORRIGIDO: permite clique no Frame
+    container.Text = ""
+    container.AutoButtonColor = false
     corner(container, 8)
     local stk = stroke(container, Color3.fromRGB(35, 35, 42), 1, 0)
     container.Parent = parent
@@ -875,22 +891,20 @@ local function makeToggle(parent, text, callback)
     toggleKnob.Parent = toggleBg
 
     local on = false
-    container.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            on = not on
-            if on then
-                TweenService:Create(toggleBg, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {BackgroundColor3 = ACCENT}):Play()
-                TweenService:Create(toggleKnob, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(1, -18, 0.5, -8), BackgroundColor3 = Color3.fromRGB(255, 255, 255)}):Play()
-                label.TextColor3 = ACCENT_LIGHT
-                stk.Color = ACCENT_DIM
-            else
-                TweenService:Create(toggleBg, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {BackgroundColor3 = TOGGLE_OFF}):Play()
-                TweenService:Create(toggleKnob, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(0, 2, 0.5, -8), BackgroundColor3 = Color3.fromRGB(100, 100, 110)}):Play()
-                label.TextColor3 = TEXT
-                stk.Color = Color3.fromRGB(35, 35, 42)
-            end
-            callback(on)
+    container.MouseButton1Click:Connect(function()
+        on = not on
+        if on then
+            TweenService:Create(toggleBg, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {BackgroundColor3 = ACCENT}):Play()
+            TweenService:Create(toggleKnob, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(1, -18, 0.5, -8), BackgroundColor3 = Color3.fromRGB(255, 255, 255)}):Play()
+            label.TextColor3 = ACCENT_LIGHT
+            stk.Color = ACCENT_DIM
+        else
+            TweenService:Create(toggleBg, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {BackgroundColor3 = TOGGLE_OFF}):Play()
+            TweenService:Create(toggleKnob, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(0, 2, 0.5, -8), BackgroundColor3 = Color3.fromRGB(100, 100, 110)}):Play()
+            label.TextColor3 = TEXT
+            stk.Color = Color3.fromRGB(35, 35, 42)
         end
+        callback(on)
     end)
 
     container.InputBegan:Connect(function(input)
@@ -958,16 +972,6 @@ local loadSteps = {
     end },
     { status = "loading misc systems...",          sub = "anti-afk + cleanup", fn = function()
         makeToggle(tabPages["Misc"], "Anti-AFK", toggleAntiAfk)
-        makeAction(tabPages["Misc"], "Close Suite", DANGER, function()
-            clearESP(); clearTracers()
-            for _, conn in pairs({flyConn, noclipConn, coinConn, knifeConn, grabConn, alarmConn, dropConn, antiAfkConn}) do
-                if conn then conn:Disconnect() end
-            end
-            toggleHitbox(false); toggleFullbright(false)
-            if alarmGui then alarmGui:Destroy() end
-            state.silentAim = false
-            ScreenGui:Destroy()
-        end)
     end },
     { status = "finalizing...",                     sub = "ready", fn = function() task.wait(0.2) end },
 }
@@ -987,12 +991,10 @@ task.spawn(function()
         TweenService:Create(BarFill, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {Size = UDim2.new(progress, 0, 1, 0)}):Play()
         LoadPercent.Text = math.floor(progress * 100) .. "%"
 
-        -- fade in tab button
         if i >= 3 and i <= 6 then
             local tabName = tabs[i - 2]
             if tabName and tabButtons[tabName] then
                 local tb = tabButtons[tabName].obj
-                -- garante que a tab esteja visível
                 tb.Visible = true
             end
         end
@@ -1000,14 +1002,12 @@ task.spawn(function()
         task.wait(0.35)
     end
 
-    -- ativa tab Combat
     TweenService:Create(tabButtons["Combat"].obj, TweenInfo.new(0.2), {BackgroundColor3 = ACCENT_DIM, TextColor3 = ACCENT_LIGHT}):Play()
     tabPages["Combat"].Visible = true
     tabButtons.current = "Combat"
 
     task.wait(0.2)
 
-    -- fade out loading
     local fadeOut = TweenService:Create(LoadFrame, TweenInfo.new(0.4, Enum.EasingStyle.Quad), {BackgroundTransparency = 1})
     TweenService:Create(LoadGlow, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
     TweenService:Create(LoadTitle, TweenInfo.new(0.4), {TextTransparency = 1}):Play()
@@ -1020,7 +1020,6 @@ task.spawn(function()
     fadeOut.Completed:Wait()
     LoadFrame:Destroy()
 
-    -- fade in main
     Main.Visible = true
     Main.BackgroundTransparency = 1
     TweenService:Create(Main, TweenInfo.new(0.4, Enum.EasingStyle.Quad), {BackgroundTransparency = 0}):Play()
