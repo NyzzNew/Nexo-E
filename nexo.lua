@@ -1,7 +1,6 @@
 --[[
     NEXO E — MM2 Suite v2.0 Overdrive
-    Features added: Gun/Knife Aura, Invisible, FPS Boost, Auto Dodge, ESP Boxes, Emotes, etc.
-    UI: 5 Tabs, optimized scrolling, sidebar layout.
+    Full feature set: 40+ features
 ]]
 
 local Players = game:GetService("Players")
@@ -29,8 +28,8 @@ local function randomName()
     return s
 end
 
-local function notify(title, text)
-    StarterGui:SetCore("SendNotification", {Title = title, Text = text, Duration = 3})
+local function notify(title, text, duration)
+    StarterGui:SetCore("SendNotification", {Title = title, Text = text, Duration = duration or 3})
 end
 
 -- ─── COLORS ───────────────────────────────────────────────────
@@ -62,18 +61,36 @@ end
 -- ─── ESTADO ───────────────────────────────────────────────────
 local scriptRunning = true
 local state = {
-    silentAim = false, knifeAim = false, gunAura = false, knifeAura = false, 
-    autoGrabGun = false, gunDropNotify = false, hitbox = false, 
-    esp = false, tracers = false, espBox = false, fullbright = false, 
-    murderAlarm = false, fly = false, noclip = false, speed = false, 
-    invisible = false, autoDodge = false, autoFarm = false, antiAfk = false, 
-    fpsBoost = false, noShadows = false, optimizeCoins = false,
+    -- Combat
+    silentAim = false, knifeAim = false, gunAura = false, knifeAura = false,
+    autoGrabGun = false, gunDropNotify = false, hitbox = false,
+    forceSheriffShoot = false, breakGun = false, dualGun = false, dualKnife = false,
+    -- Visuals
+    esp = false, espBox = false, tracers = false, cham = false, outline = false,
+    fullbright = false, noShadows = false, murderAlarm = false,
+    displayDistance = false, roundTimer = false,
+    -- Player
+    fly = false, noclip = false, speed = false, invisible = false,
+    autoDodge = false, speedGlitch = false, antiFling = false,
+    -- Utility
+    coinFarm = false, coinAura = false, autoFarm = false, xpFarm = false,
+    fpsBoost = false, optimizeCoins = false, fakeUnbox = false, fakeBomb = false,
+    -- Misc
+    antiAfk = false,
+    -- Expose/Notify
+    autoExpose = false, notifyRoles = false,
+    -- Bindable toggles
+    flyBind = false, noclipBind = false, invisibleBind = false, grabGunBind = false,
 }
 local espObjects = {}
 local boxObjects = {}
 local tracerObjects = {}
-local flyConn, noclipConn, autoFarmConn, dodgeConn, gunAuraConn, knifeAuraConn, coinConn, alarmConn, dropConn, antiAfkConn
+local chamObjects = {}
+local outlineObjects = {}
+local connections = {}
 local originalHitboxes = {}
+local lastKnownPosition = Vector3.new(0, 0, 0)
+local roundStartTime = 0
 
 -- ─── ROLES ────────────────────────────────────────────────────
 local function getRole(player)
@@ -140,36 +157,30 @@ local function hasTool(name)
     return false
 end
 
--- ─── ESP + BOXES + TRACERS ────────────────────────────────────
+-- ─── VISUALS (ESP / BOX / TRACER / CHAM / OUTLINE) ────────────
 local roleColors = {
     Murderer = Color3.fromRGB(255, 70, 70),
     Sheriff  = Color3.fromRGB(70, 130, 255),
     Innocent = Color3.fromRGB(100, 230, 130),
 }
 
-local function clearESP()
-    for _, v in pairs(espObjects) do
-        if v.hl then v.hl:Destroy() end
-        if v.tag then v.tag:Destroy() end
-    end
-    espObjects = {}
-end
-
-local function clearBoxes()
+local function clearAllVisuals()
+    for _, v in pairs(espObjects) do if v.hl then v.hl:Destroy() end if v.tag then v.tag:Destroy() end end
     for _, v in pairs(boxObjects) do if v then v:Destroy() end end
-    boxObjects = {}
-end
-
-local function clearTracers()
     for _, v in pairs(tracerObjects) do if v then v:Destroy() end end
-    tracerObjects = {}
+    for _, v in pairs(chamObjects) do if v then v:Destroy() end end
+    for _, v in pairs(outlineObjects) do if v then v:Destroy() end end
+    espObjects = {}; boxObjects = {}; tracerObjects = {}; chamObjects = {}; outlineObjects = {}
 end
 
 local function updateVisuals()
-    if not state.esp then clearESP() end
-    if not state.espBox then clearBoxes() end
-    if not state.tracers then clearTracers() end
-    if not state.esp and not state.espBox and not state.tracers then return end
+    if not state.esp then for _, v in pairs(espObjects) do if v.hl then v.hl:Destroy() end if v.tag then v.tag:Destroy() end end espObjects = {} end
+    if not state.espBox then for _, v in pairs(boxObjects) do if v then v:Destroy() end end boxObjects = {} end
+    if not state.tracers then for _, v in pairs(tracerObjects) do if v then v:Destroy() end end tracerObjects = {} end
+    if not state.cham then for _, v in pairs(chamObjects) do if v then v:Destroy() end end chamObjects = {} end
+    if not state.outline then for _, v in pairs(outlineObjects) do if v then v:Destroy() end end outlineObjects = {} end
+    
+    if not state.esp and not state.espBox and not state.tracers and not state.cham and not state.outline then return end
     
     local myHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     local cam = Workspace.CurrentCamera
@@ -182,77 +193,89 @@ local function updateVisuals()
                 local role = getRole(p)
                 local col = roleColors[role] or Color3.new(1,1,1)
                 
+                -- ESP (Highlight + Text)
                 if state.esp then
                     if not espObjects[p] or not espObjects[p].hl or not espObjects[p].hl.Parent then
-                        if espObjects[p] then
-                            if espObjects[p].hl then espObjects[p].hl:Destroy() end
-                            if espObjects[p].tag then espObjects[p].tag:Destroy() end
-                        end
-                        local hl = Instance.new("Highlight")
-                        hl.Name = randomName()
+                        if espObjects[p] then if espObjects[p].hl then espObjects[p].hl:Destroy() end if espObjects[p].tag then espObjects[p].tag:Destroy() end end
+                        local hl = Instance.new("Highlight"); hl.Name = randomName()
                         hl.FillTransparency = 0.6; hl.FillColor = col; hl.OutlineColor = col; hl.OutlineTransparency = 0
                         hl.Parent = p.Character
-                        local tag = Instance.new("BillboardGui")
-                        tag.Name = randomName()
+                        local tag = Instance.new("BillboardGui"); tag.Name = randomName()
                         tag.Size = UDim2.new(0, 140, 0, 28); tag.StudsOffset = Vector3.new(0, 3, 0); tag.AlwaysOnTop = true
                         tag.Parent = hrp
-                        local lbl = Instance.new("TextLabel")
-                        lbl.Name = randomName()
-                        lbl.Size = UDim2.new(1, 0, 1, 0); lbl.BackgroundTransparency = 1; lbl.Font = Enum.Font.GothamMedium; lbl.TextSize = 11; lbl.TextColor3 = col
+                        local lbl = Instance.new("TextLabel"); lbl.Name = randomName()
+                        lbl.Size = UDim2.new(1, 0, 1, 0); lbl.BackgroundTransparency = 1
+                        lbl.Font = Enum.Font.GothamMedium; lbl.TextSize = 11; lbl.TextColor3 = col
                         lbl.Parent = tag
                         espObjects[p] = { hl = hl, tag = tag, lbl = lbl }
                     end
                     local e = espObjects[p]
                     e.hl.FillColor = col; e.hl.OutlineColor = col; e.hl.Parent = p.Character; e.tag.Parent = hrp
                     local dist = myHrp and math.floor((hrp.Position - myHrp.Position).Magnitude) or 0
-                    e.lbl.Text = p.Name .. "  " .. role .. "  " .. dist .. "m"; e.lbl.TextColor3 = col
+                    e.lbl.Text = p.Name .. "  " .. role .. (state.displayDistance and ("  " .. dist .. "m") or "")
+                    e.lbl.TextColor3 = col
                 end
                 
+                -- ESP Box
                 if state.espBox then
                     if not boxObjects[p] or not boxObjects[p].Parent then
-                        local box = Instance.new("BillboardGui")
-                        box.Name = randomName()
-                        box.Size = UDim2.new(0, 100, 0, 100)
-                        box.AlwaysOnTop = true
-                        box.Parent = hrp
-                        local frame = Instance.new("Frame")
-                        frame.Name = randomName()
-                        frame.Size = UDim2.new(1, 0, 1, 0)
-                        frame.BackgroundTransparency = 1
-                        frame.Parent = box
-                        local s = Instance.new("UIStroke"); s.Color = col; s.Thickness = 2; s.Parent = frame
+                        local box = Instance.new("BillboardGui"); box.Name = randomName()
+                        box.Size = UDim2.new(0, 100, 0, 100); box.AlwaysOnTop = true; box.Parent = hrp
+                        local f = Instance.new("Frame"); f.Name = randomName()
+                        f.Size = UDim2.new(1, 0, 1, 0); f.BackgroundTransparency = 1; f.Parent = box
+                        local s = Instance.new("UIStroke"); s.Color = col; s.Thickness = 2; s.Parent = f
                         boxObjects[p] = box
                     end
                     boxObjects[p].Parent = hrp
                 end
                 
+                -- Tracers
                 if state.tracers then
                     if not tracerObjects[p] or not tracerObjects[p].Parent then
-                        local line = Instance.new("Frame")
-                        line.Name = randomName()
+                        local line = Instance.new("Frame"); line.Name = randomName()
                         line.BackgroundColor3 = col; line.BorderSizePixel = 0; line.AnchorPoint = Vector2.new(0.5, 0.5)
                         line.Parent = ScreenGui
                         tracerObjects[p] = line
                     end
                     local line = tracerObjects[p]
                     line.BackgroundColor3 = col
-                    local screenPos, onScreen = cam:WorldToViewportPoint(hrp.Position)
+                    local sp, onScreen = cam:WorldToViewportPoint(hrp.Position)
                     if onScreen then
                         line.Visible = true
-                        line.Size = UDim2.new(0, 1, 0, math.abs(screenPos.Y - (cam.ViewportSize.Y/2)))
-                        line.Position = UDim2.new(0, screenPos.X, 0, screenPos.Y)
+                        line.Size = UDim2.new(0, 1, 0, math.abs(sp.Y - (cam.ViewportSize.Y/2)))
+                        line.Position = UDim2.new(0, sp.X, 0, sp.Y)
                     else
                         line.Visible = false
                     end
                 end
-            else
-                if espObjects[p] then
-                    if espObjects[p].hl then espObjects[p].hl:Destroy() end
-                    if espObjects[p].tag then espObjects[p].tag:Destroy() end
-                    espObjects[p] = nil
+                
+                -- Cham (solid color overlay)
+                if state.cham then
+                    if not chamObjects[p] or not chamObjects[p].Parent then
+                        local hl = Instance.new("Highlight"); hl.Name = randomName()
+                        hl.FillTransparency = 0.3; hl.FillColor = col; hl.OutlineTransparency = 1
+                        hl.Parent = p.Character
+                        chamObjects[p] = hl
+                    end
+                    chamObjects[p].FillColor = col; chamObjects[p].Parent = p.Character
                 end
+                
+                -- Outline (thick stroke)
+                if state.outline then
+                    if not outlineObjects[p] or not outlineObjects[p].Parent then
+                        local hl = Instance.new("Highlight"); hl.Name = randomName()
+                        hl.FillTransparency = 1; hl.OutlineColor = col; hl.OutlineTransparency = 0
+                        hl.Parent = p.Character
+                        outlineObjects[p] = hl
+                    end
+                    outlineObjects[p].OutlineColor = col; outlineObjects[p].Parent = p.Character
+                end
+            else
+                if espObjects[p] then if espObjects[p].hl then espObjects[p].hl:Destroy() end if espObjects[p].tag then espObjects[p].tag:Destroy() end espObjects[p] = nil end
                 if boxObjects[p] then boxObjects[p]:Destroy(); boxObjects[p] = nil end
                 if tracerObjects[p] then tracerObjects[p]:Destroy(); tracerObjects[p] = nil end
+                if chamObjects[p] then chamObjects[p]:Destroy(); chamObjects[p] = nil end
+                if outlineObjects[p] then outlineObjects[p]:Destroy(); outlineObjects[p] = nil end
             end
         end
     end
@@ -285,7 +308,6 @@ mt.__namecall = newcclosure(function(self, ...)
                 for _, t in ipairs(char:GetChildren()) do
                     if t:IsA("Tool") and t.Name:lower():match("gun") then hasGun = true break end
                 end
-                
                 if hasGun then
                     local murderer = getMurdererOptimized()
                     if murderer and murderer.Character then
@@ -293,7 +315,6 @@ mt.__namecall = newcclosure(function(self, ...)
                         if target then
                             local args = {...}
                             local cam = Workspace.CurrentCamera
-                            
                             if method == "Raycast" then
                                 local origin = args[1]
                                 if origin and (origin - cam.CFrame.Position).Magnitude < 5 then
@@ -324,7 +345,7 @@ setreadonly(mt, true)
 local function toggleKnifeAim(on)
     state.knifeAim = on
     if on then
-        knifeAuraConn = RunService.Heartbeat:Connect(function()
+        connections.knifeAim = RunService.Heartbeat:Connect(function()
             local tool = hasTool("knife"); if not tool then return end
             local target = getNearestPlayer("Innocent") or getNearestPlayer("Sheriff")
             if not target or not target.Character then return end
@@ -338,14 +359,14 @@ local function toggleKnifeAim(on)
             end
         end)
     else
-        if knifeAuraConn then knifeAuraConn:Disconnect() knifeAuraConn = nil end
+        if connections.knifeAim then connections.knifeAim:Disconnect() connections.knifeAim = nil end
     end
 end
 
 local function toggleGunAura(on)
     state.gunAura = on
     if on then
-        gunAuraConn = RunService.Heartbeat:Connect(function()
+        connections.gunAura = RunService.Heartbeat:Connect(function()
             local tool = hasTool("gun"); if not tool then return end
             local target = getMurderer()
             if target and target.Character then
@@ -356,14 +377,35 @@ local function toggleGunAura(on)
             end
         end)
     else
-        if gunAuraConn then gunAuraConn:Disconnect() gunAuraConn = nil end
+        if connections.gunAura then connections.gunAura:Disconnect() connections.gunAura = nil end
+    end
+end
+
+local function toggleKnifeAura(on)
+    state.knifeAura = on
+    if on then
+        connections.knifeAura = RunService.Heartbeat:Connect(function()
+            local tool = hasTool("knife"); if not tool then return end
+            local target = getNearestPlayer("Innocent") or getNearestPlayer("Sheriff")
+            if not target or not target.Character then return end
+            local tHrp = target.Character:FindFirstChild("HumanoidRootPart")
+            local tHum = target.Character:FindFirstChildOfClass("Humanoid")
+            if not tHrp or not tHum or tHum.Health <= 0 then return end
+            local char = LocalPlayer.Character; if not char then return end
+            local hrp = char:FindFirstChild("HumanoidRootPart"); if not hrp then return end
+            if (tHrp.Position - hrp.Position).Magnitude < 20 then
+                task.spawn(function() tool:Activate() end)
+            end
+        end)
+    else
+        if connections.knifeAura then connections.knifeAura:Disconnect() connections.knifeAura = nil end
     end
 end
 
 local function toggleAutoGrabGun(on)
     state.autoGrabGun = on
     if on then
-        dropConn = RunService.Heartbeat:Connect(function()
+        connections.autoGrabGun = RunService.Heartbeat:Connect(function()
             if hasTool("gun") then return end
             for _, obj in ipairs(Workspace:GetDescendants()) do
                 if obj:IsA("Tool") and obj.Name:lower():match("gun") then
@@ -375,8 +417,6 @@ local function toggleAutoGrabGun(on)
                                 local dist = (handle.Position - hrp.Position).Magnitude
                                 if dist < 500 then
                                     task.spawn(function()
-                                        hrp.CFrame = CFrame.new(handle.Position)
-                                        task.wait(0.1)
                                         firetouchinterest(hrp, handle, 0)
                                         firetouchinterest(hrp, handle, 1)
                                     end)
@@ -388,7 +428,35 @@ local function toggleAutoGrabGun(on)
             end
         end)
     else
-        if dropConn then dropConn:Disconnect() dropConn = nil end
+        if connections.autoGrabGun then connections.autoGrabGun:Disconnect() connections.autoGrabGun = nil end
+    end
+end
+
+local function toggleGunDropNotify(on)
+    state.gunDropNotify = on
+    if on then
+        connections.gunDropNotify = RunService.Heartbeat:Connect(function()
+            if hasTool("gun") then return end
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if obj:IsA("Tool") and obj.Name:lower():match("gun") then
+                    local handle = obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart")
+                    if handle then
+                        local char = LocalPlayer.Character; if char then
+                            local hrp = char:FindFirstChild("HumanoidRootPart")
+                            if hrp then
+                                local dist = (handle.Position - hrp.Position).Magnitude
+                                if dist < 500 then
+                                    notify("GUN DROPPED", "Gun is " .. math.floor(dist) .. "m away!", 2)
+                                    task.wait(3)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+    else
+        if connections.gunDropNotify then connections.gunDropNotify:Disconnect() connections.gunDropNotify = nil end
     end
 end
 
@@ -428,6 +496,11 @@ local function toggleFullbright(on)
     end
 end
 
+local function toggleNoShadows(on)
+    state.noShadows = on
+    Lighting.GlobalShadows = not on
+end
+
 local function toggleInvisible(on)
     state.invisible = on
     local char = LocalPlayer.Character
@@ -443,7 +516,7 @@ end
 local function toggleAutoDodge(on)
     state.autoDodge = on
     if on then
-        dodgeConn = RunService.Heartbeat:Connect(function()
+        connections.autoDodge = RunService.Heartbeat:Connect(function()
             local char = LocalPlayer.Character; if not char then return end
             local hrp = char:FindFirstChild("HumanoidRootPart"); if not hrp then return end
             local murderer = getMurderer()
@@ -457,7 +530,33 @@ local function toggleAutoDodge(on)
             end
         end)
     else
-        if dodgeConn then dodgeConn:Disconnect() dodgeConn = nil end
+        if connections.autoDodge then connections.autoDodge:Disconnect() connections.autoDodge = nil end
+    end
+end
+
+local function toggleAntiFling(on)
+    state.antiFling = on
+    if on then
+        local char = LocalPlayer.Character
+        if char then
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if hrp then lastKnownPosition = hrp.Position end
+        end
+        connections.antiFling = RunService.Heartbeat:Connect(function()
+            local char = LocalPlayer.Character; if not char then return end
+            local hrp = char:FindFirstChild("HumanoidRootPart"); if not hrp then return end
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            -- se o personagem se moveu muito rápido sem input (fling), reverte
+            if lastKnownPosition then
+                local delta = (hrp.Position - lastKnownPosition).Magnitude
+                if delta > 50 and hum and hum.Health > 0 then
+                    task.spawn(function() hrp.CFrame = CFrame.new(lastKnownPosition) end)
+                end
+            end
+            lastKnownPosition = hrp.Position
+        end)
+    else
+        if connections.antiFling then connections.antiFling:Disconnect() connections.antiFling = nil end
     end
 end
 
@@ -465,18 +564,13 @@ local function toggleFPSBoost(on)
     state.fpsBoost = on
     if on then
         for _, v in ipairs(Workspace:GetDescendants()) do
-            if v:IsA("BasePart") then
-                v.Material = Enum.Material.SmoothPlastic
-            end
+            if v:IsA("BasePart") then v.Material = Enum.Material.SmoothPlastic end
+            if v:IsA("Decal") then v.Transparency = 1 end
+            if v:IsA("ParticleEmitter") or v:IsA("Trail") then v.Enabled = false end
         end
-    else
-        -- Revert is complex without storing originals, leaving smooth plastic is safer for performance
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 9e9
     end
-end
-
-local function toggleNoShadows(on)
-    state.noShadows = on
-    Lighting.GlobalShadows = not on
 end
 
 local function toggleOptimizeCoins(on)
@@ -484,14 +578,53 @@ local function toggleOptimizeCoins(on)
     if on then
         for _, v in ipairs(Workspace:GetDescendants()) do
             if v:IsA("BasePart") and (v.Name:lower():match("coin") or v.Name:lower():match("pickup")) then
-                v.Material = Enum.Material.SmoothPlastic
-                v.Reflectance = 0
+                v.Material = Enum.Material.SmoothPlastic; v.Reflectance = 0
             end
         end
     end
 end
 
-local alarmGui
+local function toggleCoinAura(on)
+    state.coinAura = on
+    if on then
+        connections.coinAura = RunService.Heartbeat:Connect(function()
+            local char = LocalPlayer.Character; if not char then return end
+            local hrp = char:FindFirstChild("HumanoidRootPart"); if not hrp then return end
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if obj:IsA("BasePart") and (obj.Name:lower():match("coin") or obj.Name:lower():match("pickup")) then
+                    local dist = (obj.Position - hrp.Position).Magnitude
+                    if dist < 200 then
+                        task.spawn(function()
+                            obj.CFrame = obj.CFrame:Lerp(hrp.CFrame, 0.3)
+                        end)
+                    end
+                end
+            end
+        end)
+    else
+        if connections.coinAura then connections.coinAura:Disconnect() connections.coinAura = nil end
+    end
+end
+
+local function toggleCoinFarm(on)
+    state.coinFarm = on
+    if on then
+        connections.coinFarm = RunService.Heartbeat:Connect(function()
+            local char = LocalPlayer.Character; if not char then return end
+            local hrp = char:FindFirstChild("HumanoidRootPart"); if not hrp then return end
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if obj:IsA("BasePart") and (obj.Name:lower():match("coin") or obj.Name:lower():match("pickup")) then
+                    if (obj.Position - hrp.Position).Magnitude < 200 then
+                        task.spawn(function() obj.Position = hrp.Position end)
+                    end
+                end
+            end
+        end)
+    else
+        if connections.coinFarm then connections.coinFarm:Disconnect() connections.coinFarm = nil end
+    end
+end
+
 local function toggleMurderAlarm(on)
     state.murderAlarm = on
     if on then
@@ -504,7 +637,7 @@ local function toggleMurderAlarm(on)
             corner(alarmGui, 8); stroke(alarmGui, Color3.fromRGB(200, 50, 50), 1, 0.3)
             alarmGui.Parent = ScreenGui
         end
-        alarmConn = RunService.Heartbeat:Connect(function()
+        connections.alarm = RunService.Heartbeat:Connect(function()
             local char = LocalPlayer.Character; if not char then return end
             local hrp = char:FindFirstChild("HumanoidRootPart"); if not hrp then return end
             local murderer = getMurderer()
@@ -520,7 +653,7 @@ local function toggleMurderAlarm(on)
             else alarmGui.Visible = false end
         end)
     else
-        if alarmConn then alarmConn:Disconnect() alarmConn = nil end
+        if connections.alarm then connections.alarm:Disconnect() connections.alarm = nil end
         if alarmGui then alarmGui.Visible = false end
     end
 end
@@ -528,13 +661,24 @@ end
 local function toggleAntiAfk(on)
     state.antiAfk = on
     if on then
-        antiAfkConn = LocalPlayer.Idled:Connect(function()
+        connections.antiAfk = LocalPlayer.Idled:Connect(function()
             task.spawn(function() VirtualUser:CaptureController(); VirtualUser:ClickButton2(Vector2.new()) end)
         end)
     else
-        if antiAfkConn then antiAfkConn:Disconnect() antiAfkConn = nil end
+        if connections.antiAfk then connections.antiAfk:Disconnect() connections.antiAfk = nil end
     end
 end
+
+local function toggleSpeedGlitch(on)
+    state.speedGlitch = on
+    local char = LocalPlayer.Character
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then task.spawn(function() hum.WalkSpeed = on and 32 or 16 end) end
+    end
+end
+
+local function toggleSpeed(on) state.speed = on; local char = LocalPlayer.Character; if char then local hum = char:FindFirstChildOfClass("Humanoid") if hum then task.spawn(function() hum.WalkSpeed = on and 50 or 16 end) end end end
 
 local flySpeed = 60
 local function toggleFly(on)
@@ -545,7 +689,7 @@ local function toggleFly(on)
         local bv = Instance.new("BodyVelocity")
         bv.Name = randomName(); bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge); bv.Velocity = Vector3.zero
         bv.Parent = hrp
-        flyConn = RunService.RenderStepped:Connect(function()
+        connections.fly = RunService.RenderStepped:Connect(function()
             if not state.fly then return end
             local cam = Workspace.CurrentCamera; local move = Vector3.zero
             if UserInputService:IsKeyDown(Enum.KeyCode.W) then move = move + cam.CFrame.LookVector end
@@ -557,7 +701,7 @@ local function toggleFly(on)
             bv.Velocity = move * flySpeed
         end)
     else
-        if flyConn then flyConn:Disconnect() flyConn = nil end
+        if connections.fly then connections.fly:Disconnect() connections.fly = nil end
         local char = LocalPlayer.Character
         if char then
             local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -569,7 +713,7 @@ end
 local function toggleNoclip(on)
     state.noclip = on
     if on then
-        noclipConn = RunService.Stepped:Connect(function()
+        connections.noclip = RunService.Stepped:Connect(function()
             local char = LocalPlayer.Character
             if char then
                 for _, p in ipairs(char:GetDescendants()) do
@@ -578,28 +722,7 @@ local function toggleNoclip(on)
             end
         end)
     else
-        if noclipConn then noclipConn:Disconnect() noclipConn = nil end
-    end
-end
-
-local function toggleSpeed(on) state.speed = on; local char = LocalPlayer.Character; if char then local hum = char:FindFirstChildOfClass("Humanoid") if hum then task.spawn(function() hum.WalkSpeed = on and 50 or 16 end) end end end
-
-local function toggleCoinFarm(on)
-    state.coinFarm = on
-    if on then
-        coinConn = RunService.Heartbeat:Connect(function()
-            local char = LocalPlayer.Character; if not char then return end
-            local hrp = char:FindFirstChild("HumanoidRootPart"); if not hrp then return end
-            for _, obj in ipairs(Workspace:GetDescendants()) do
-                if obj:IsA("BasePart") and (obj.Name:lower():match("coin") or obj.Name:lower():match("pickup")) then
-                    if (obj.Position - hrp.Position).Magnitude < 200 then
-                        task.spawn(function() obj.Position = hrp.Position end)
-                    end
-                end
-            end
-        end)
-    else
-        if coinConn then coinConn:Disconnect() coinConn = nil end
+        if connections.noclip then connections.noclip:Disconnect() connections.noclip = nil end
     end
 end
 
@@ -624,7 +747,12 @@ local function forceSheriffShoot()
         local tool = sheriff.Character:FindFirstChildOfClass("Tool")
         if tool and tool.Name:lower():match("gun") then
             tool:Activate()
+            notify("NEXO E", "Forced sheriff to shoot", 2)
+        else
+            notify("NEXO E", "Sheriff doesn't have gun equipped", 2)
         end
+    else
+        notify("NEXO E", "No sheriff found", 2)
     end
 end
 
@@ -640,6 +768,96 @@ local function playEmote(name)
         end
     end
 end
+
+local function exposeRoles()
+    local mur = getMurderer()
+    local sher = getSheriff()
+    if mur then notify("MURDERER", mur.Name, 5) end
+    if sher then notify("SHERIFF", sher.Name, 5) end
+    if not mur and not sher then notify("NEXO E", "Roles not assigned yet", 3) end
+end
+
+local function toggleAutoExpose(on)
+    state.autoExpose = on
+    if on then
+        connections.autoExpose = RunService.Heartbeat:Connect(function()
+            local mur = getMurderer()
+            local sher = getSheriff()
+            if mur or sher then
+                exposeRoles()
+                task.wait(10)
+            end
+            task.wait(1)
+        end)
+    else
+        if connections.autoExpose then connections.autoExpose:Disconnect() connections.autoExpose = nil end
+    end
+end
+
+local function fakeBombClutch()
+    notify("BOMB", "Bomb has been defused!", 3)
+end
+
+local function fakeUnbox()
+    local items = {"Godly Knife", "Legendary Gun", "Rare Skin", "Common Knife"}
+    local item = items[math.random(1, #items)]
+    notify("UNBOXING", "You got: " .. item .. "!", 4)
+end
+
+-- ─── ROUND TIMER ──────────────────────────────────────────────
+local timerGui
+local function toggleRoundTimer(on)
+    state.roundTimer = on
+    if on then
+        if not timerGui then
+            timerGui = Instance.new("TextLabel")
+            timerGui.Name = randomName()
+            timerGui.Size = UDim2.new(0, 120, 0, 28)
+            timerGui.Position = UDim2.new(0.5, -60, 0, 60)
+            timerGui.BackgroundColor3 = BG
+            timerGui.TextColor3 = ACCENT_LIGHT
+            timerGui.Font = Enum.Font.GothamBold
+            timerGui.TextSize = 14
+            timerGui.Text = "Time: --"
+            corner(timerGui, 6)
+            stroke(timerGui, ACCENT_DIM, 1, 0.3)
+            timerGui.Parent = ScreenGui
+        end
+        timerGui.Visible = true
+        roundStartTime = os.clock()
+        connections.roundTimer = RunService.Heartbeat:Connect(function()
+            local elapsed = os.clock() - roundStartTime
+            local mins = math.floor(elapsed / 60)
+            local secs = math.floor(elapsed % 60)
+            timerGui.Text = "Time: " .. string.format("%d:%02d", mins, secs)
+        end)
+    else
+        if connections.roundTimer then connections.roundTimer:Disconnect() connections.roundTimer = nil end
+        if timerGui then timerGui.Visible = false end
+    end
+end
+
+-- ─── BINDABLE BUTTONS (KEYBINDS) ──────────────────────────────
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == Enum.KeyCode.F then
+        state.flyBind = not state.flyBind
+        toggleFly(state.flyBind)
+        notify("NEXO E", "Fly: " .. (state.flyBind and "ON" or "OFF"), 1.5)
+    elseif input.KeyCode == Enum.KeyCode.N then
+        state.noclipBind = not state.noclipBind
+        toggleNoclip(state.noclipBind)
+        notify("NEXO E", "Noclip: " .. (state.noclipBind and "ON" or "OFF"), 1.5)
+    elseif input.KeyCode == Enum.KeyCode.V then
+        state.invisibleBind = not state.invisibleBind
+        toggleInvisible(state.invisibleBind)
+        notify("NEXO E", "Invisible: " .. (state.invisibleBind and "ON" or "OFF"), 1.5)
+    elseif input.KeyCode == Enum.KeyCode.G then
+        state.grabGunBind = not state.grabGunBind
+        toggleAutoGrabGun(state.grabGunBind)
+        notify("NEXO E", "Grab Gun: " .. (state.grabGunBind and "ON" or "OFF"), 1.5)
+    end
+end)
 
 -- ─── MAIN GUI ─────────────────────────────────────────────────
 local ScreenGui = Instance.new("ScreenGui")
@@ -661,7 +879,7 @@ FloatBtn.TextSize = 20
 FloatBtn.Visible = false
 FloatBtn.Parent = ScreenGui
 corner(FloatBtn, 25)
-local floatStroke = stroke(FloatBtn, ACCENT, 1.5, 0.2)
+stroke(FloatBtn, ACCENT, 1.5, 0.2)
 
 local FloatGlow = Instance.new("Frame")
 FloatGlow.Name = randomName()
@@ -838,14 +1056,25 @@ corner(Sidebar, 12)
 
 local SideTitle = Instance.new("TextLabel")
 SideTitle.Name = randomName()
-SideTitle.Size = UDim2.new(1, 0, 0, 50)
+SideTitle.Size = UDim2.new(1, 0, 0, 40)
 SideTitle.BackgroundTransparency = 1
 SideTitle.Text = "NEXO E"
 SideTitle.TextColor3 = TEXT
 SideTitle.Font = Enum.Font.GothamBlack
-SideTitle.TextSize = 16
+SideTitle.TextSize = 15
 SideTitle.Parent = Sidebar
 gradient(SideTitle, ACCENT_LIGHT, ACCENT, 0)
+
+local SideKeys = Instance.new("TextLabel")
+SideKeys.Name = randomName()
+SideKeys.Size = UDim2.new(1, 0, 0, 30)
+SideKeys.Position = UDim2.new(0, 0, 1, -66)
+SideKeys.BackgroundTransparency = 1
+SideKeys.Text = "[F]ly [N]oclip\n[V]Invis [G]Gun"
+SideKeys.TextColor3 = TEXT_DIM
+SideKeys.Font = Enum.Font.Gotham
+SideKeys.TextSize = 9
+SideKeys.Parent = Sidebar
 
 local tabs = {"Combat", "Visuals", "Player", "Utility", "Misc"}
 local tabButtons = {}
@@ -854,8 +1083,8 @@ local tabPages = {}
 for i, name in ipairs(tabs) do
     local tabBtn = Instance.new("TextButton")
     tabBtn.Name = randomName()
-    tabBtn.Size = UDim2.new(1, -20, 0, 28)
-    tabBtn.Position = UDim2.new(0, 10, 0, 50 + (i-1)*32)
+    tabBtn.Size = UDim2.new(1, -20, 0, 26)
+    tabBtn.Position = UDim2.new(0, 10, 0, 45 + (i-1)*28)
     tabBtn.BackgroundColor3 = BG_CARD
     tabBtn.BorderSizePixel = 0
     tabBtn.Text = name
@@ -894,7 +1123,7 @@ for i, name in ipairs(tabs) do
     page.Parent = Main
 
     local pageLayout = Instance.new("UIListLayout")
-    pageLayout.Padding = UDim.new(0, 8)
+    pageLayout.Padding = UDim.new(0, 6)
     pageLayout.Parent = page
 
     padding(page, 0, 10, 0, 10)
@@ -943,7 +1172,7 @@ end)
 local function makeToggle(parent, text, callback)
     local container = Instance.new("TextButton")
     container.Name = randomName()
-    container.Size = UDim2.new(1, 0, 0, 32)
+    container.Size = UDim2.new(1, 0, 0, 30)
     container.BackgroundColor3 = BG_CARD
     container.BorderSizePixel = 0
     container.Text = ""
@@ -1014,7 +1243,7 @@ end
 local function makeAction(parent, text, color, callback)
     local btn = Instance.new("TextButton")
     btn.Name = randomName()
-    btn.Size = UDim2.new(1, 0, 0, 32)
+    btn.Size = UDim2.new(1, 0, 0, 30)
     btn.BackgroundColor3 = BG_CARD
     btn.BorderSizePixel = 0
     btn.Text = text
@@ -1041,55 +1270,70 @@ end
 
 -- ─── LOADING SEQUENCE ─────────────────────────────────────────
 local loadSteps = {
-    { status = "booting core modules...",         sub = "hooking metamethods", fn = function() task.wait(0.3) end },
-    { status = "establishing stealth layer...",    sub = "gethui + randomization", fn = function() task.wait(0.25) end },
-    { status = "loading combat systems...",        sub = "silent aim + aura", fn = function()
+    { status = "booting core modules...", sub = "hooking metamethods", fn = function() task.wait(0.3) end },
+    { status = "establishing stealth layer...", sub = "gethui + randomization", fn = function() task.wait(0.25) end },
+    { status = "loading combat systems...", sub = "silent aim + aura + grab", fn = function()
         makeToggle(tabPages["Combat"], "Gun Silent Aim", function(on) state.silentAim = on end)
         makeToggle(tabPages["Combat"], "Knife Silent Aim", toggleKnifeAim)
         makeToggle(tabPages["Combat"], "Gun Aura", toggleGunAura)
-        makeToggle(tabPages["Combat"], "Auto Grab Gun", toggleAutoGrabGun)
+        makeToggle(tabPages["Combat"], "Knife Aura", toggleKnifeAura)
+        makeToggle(tabPages["Combat"], "Auto Grab Gun [G]", toggleAutoGrabGun)
+        makeToggle(tabPages["Combat"], "Gun Drop Notify", toggleGunDropNotify)
         makeToggle(tabPages["Combat"], "Hitbox Expander", toggleHitbox)
         makeAction(tabPages["Combat"], "Force Sheriff Shoot", ACCENT_LIGHT, forceSheriffShoot)
+        makeAction(tabPages["Combat"], "Expose Roles", ACCENT_LIGHT, exposeRoles)
+        makeToggle(tabPages["Combat"], "Auto Expose Roles", toggleAutoExpose)
     end },
-    { status = "loading visual systems...",        sub = "esp + boxes + tracers", fn = function()
-        makeToggle(tabPages["Visuals"], "ESP (Roles + Dist)", function(on) state.esp = on end)
-        makeToggle(tabPages["Visuals"], "ESP Boxes", function(on) state.espBox = on end)
+    { status = "loading visual systems...", sub = "esp + cham + outline + box", fn = function()
+        makeToggle(tabPages["Visuals"], "ESP (Roles)", function(on) state.esp = on end)
+        makeToggle(tabPages["Visuals"], "Display Distance", function(on) state.displayDistance = on end)
+        makeToggle(tabPages["Visuals"], "ESP Box", function(on) state.espBox = on end)
         makeToggle(tabPages["Visuals"], "Tracers", function(on) state.tracers = on end)
+        makeToggle(tabPages["Visuals"], "Cham (Solid)", function(on) state.cham = on end)
+        makeToggle(tabPages["Visuals"], "Outline", function(on) state.outline = on end)
         makeToggle(tabPages["Visuals"], "Fullbright", toggleFullbright)
         makeToggle(tabPages["Visuals"], "No Shadows", toggleNoShadows)
         makeToggle(tabPages["Visuals"], "Murderer Alarm", toggleMurderAlarm)
+        makeToggle(tabPages["Visuals"], "Round Timer", toggleRoundTimer)
     end },
-    { status = "loading player systems...",        sub = "fly + noclip + speed", fn = function()
-        makeToggle(tabPages["Player"], "Fly (WASD/Space/Ctrl)", toggleFly)
-        makeToggle(tabPages["Player"], "Noclip", toggleNoclip)
+    { status = "loading player systems...", sub = "fly + noclip + invis + dodge", fn = function()
+        makeToggle(tabPages["Player"], "Fly [F] (WASD/Sp/Ctrl)", toggleFly)
+        makeToggle(tabPages["Player"], "Noclip [N]", toggleNoclip)
+        makeToggle(tabPages["Player"], "Invisible [V]", toggleInvisible)
         makeToggle(tabPages["Player"], "Speed x3", toggleSpeed)
-        makeToggle(tabPages["Player"], "Invisible", toggleInvisible)
+        makeToggle(tabPages["Player"], "Speed Glitch", toggleSpeedGlitch)
         makeToggle(tabPages["Player"], "Auto Dodge Murderer", toggleAutoDodge)
+        makeToggle(tabPages["Player"], "Anti-Fling", toggleAntiFling)
         makeAction(tabPages["Player"], "Teleport Random", ACCENT_LIGHT, tpRandom)
     end },
-    { status = "loading utility systems...",       sub = "farm + fps + emotes", fn = function()
+    { status = "loading utility systems...", sub = "farm + fps + emotes", fn = function()
         makeToggle(tabPages["Utility"], "Coin Farm", toggleCoinFarm)
+        makeToggle(tabPages["Utility"], "Coin Aura", toggleCoinAura)
         makeToggle(tabPages["Utility"], "FPS Boost", toggleFPSBoost)
         makeToggle(tabPages["Utility"], "Optimize Coins", toggleOptimizeCoins)
+        makeAction(tabPages["Utility"], "Fake Unbox", ACCENT_LIGHT, fakeUnbox)
+        makeAction(tabPages["Utility"], "Fake Bomb Clutch", ACCENT_LIGHT, fakeBombClutch)
         makeAction(tabPages["Utility"], "Emote: Sit", TEXT_DIM, function() playEmote("507768133") end)
         makeAction(tabPages["Utility"], "Emote: Dab", TEXT_DIM, function() playEmote("248263260") end)
         makeAction(tabPages["Utility"], "Emote: Wave", TEXT_DIM, function() playEmote("128777973") end)
+        makeAction(tabPages["Utility"], "Emote: Floss", TEXT_DIM, function() playEmote("8555766494") end)
+        makeAction(tabPages["Utility"], "Emote: Ninja", TEXT_DIM, function() playEmote("6595389634") end)
+        makeAction(tabPages["Utility"], "Emote: Zombie", TEXT_DIM, function() playEmote("6160763406") end)
     end },
-    { status = "loading misc systems...",          sub = "anti-afk + kill", fn = function()
+    { status = "loading misc systems...", sub = "anti-afk + kill", fn = function()
         makeToggle(tabPages["Misc"], "Anti-AFK", toggleAntiAfk)
         makeAction(tabPages["Misc"], "Kill Script", DANGER, function()
             scriptRunning = false
-            clearESP(); clearBoxes(); clearTracers()
-            for _, conn in pairs({flyConn, noclipConn, autoFarmConn, dodgeConn, gunAuraConn, knifeAuraConn, coinConn, alarmConn, dropConn, antiAfkConn}) do
-                if conn then conn:Disconnect() end
-            end
+            clearAllVisuals()
+            for _, conn in pairs(connections) do if conn then conn:Disconnect() end end
             toggleHitbox(false); toggleFullbright(false); toggleInvisible(false)
             if alarmGui then alarmGui:Destroy() end
+            if timerGui then timerGui:Destroy() end
             state.silentAim = false
             ScreenGui:Destroy()
         end)
     end },
-    { status = "finalizing...",                     sub = "ready", fn = function() task.wait(0.2) end },
+    { status = "finalizing...", sub = "ready", fn = function() task.wait(0.2) end },
 }
 
 task.spawn(function()
@@ -1110,8 +1354,7 @@ task.spawn(function()
         if i >= 3 and i <= 7 then
             local tabName = tabs[i - 2]
             if tabName and tabButtons[tabName] then
-                local tb = tabButtons[tabName].obj
-                tb.Visible = true
+                tabButtons[tabName].obj.Visible = true
             end
         end
 
@@ -1154,8 +1397,10 @@ LocalPlayer.CharacterAdded:Connect(function()
     task.wait(1)
     if not scriptRunning then return end
     if state.speed then toggleSpeed(true) end
+    if state.speedGlitch then toggleSpeedGlitch(true) end
     if state.hitbox then toggleHitbox(true) end
     if state.invisible then toggleInvisible(true) end
+    if state.antiFling then toggleAntiFling(true) end
 end)
 
-print("[NEXO E] loaded — welcome, Maker.")
+print("[NEXO E] v2.0 loaded — welcome, Maker.")
