@@ -1,6 +1,6 @@
 --[[
-    NEXO E — MM2 Suite (Modern UI)
-    Sidebar layout, drop shadow, sleek toggles, glowing float button
+    NEXO E — MM2 Suite (Optimized)
+    Fixed: Silent Aim lag (caching + distance filter)
 ]]
 
 local Players = game:GetService("Players")
@@ -225,34 +225,55 @@ local function updateESP()
     end
 end
 
--- ─── GUN SILENT AIM ───────────────────────────────────────────
+-- ─── GUN SILENT AIM (OTIMIZADO) ───────────────────────────────
 local oldNamecall
+local cachedMurderer = nil
+local lastMurdererCheck = 0
+
+local function getMurdererOptimized()
+    local now = os.clock()
+    if now - lastMurdererCheck > 1 then
+        cachedMurderer = getMurderer()
+        lastMurdererCheck = now
+    end
+    return cachedMurderer
+end
+
 if hookmetamethod then
     oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
         local method = getnamecallmethod()
-        if state.silentAim and hasTool("gun") and not checkcaller() then
-            if method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRay" or method == "FindPartOnRayWithWhitelist" then
-                local murderer = getMurderer()
-                if murderer and murderer.Character then
-                    local target = murderer.Character:FindFirstChild("Head") or murderer.Character:FindFirstChild("HumanoidRootPart")
-                    if target then
-                        local args = {...}
-                        local ray = args[1]
-                        if typeof(ray) == "Ray" then
-                            args[1] = Ray.new(ray.Origin, (target.Position - ray.Origin).Unit * 3000)
-                        end
-                        return oldNamecall(self, unpack(args))
-                    end
+        if state.silentAim and method and (method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRay" or method == "FindPartOnRayWithWhitelist" or method == "Raycast") then
+            local localChar = LocalPlayer.Character
+            if localChar then
+                local hasGun = false
+                for _, t in ipairs(localChar:GetChildren()) do
+                    if t:IsA("Tool") and t.Name:lower():match("gun") then hasGun = true break end
                 end
-            elseif method == "Raycast" then
-                local murderer = getMurderer()
-                if murderer and murderer.Character then
-                    local target = murderer.Character:FindFirstChild("Head") or murderer.Character:FindFirstChild("HumanoidRootPart")
-                    if target then
-                        local args = {...}
-                        local origin = args[1]
-                        args[2] = (target.Position - origin).Unit * 3000
-                        return oldNamecall(self, unpack(args))
+                
+                if hasGun and not checkcaller() then
+                    local murderer = getMurdererOptimized()
+                    if murderer and murderer.Character then
+                        local target = murderer.Character:FindFirstChild("Head") or murderer.Character:FindFirstChild("HumanoidRootPart")
+                        if target then
+                            local args = {...}
+                            if method == "Raycast" then
+                                local origin = args[1]
+                                local myHrp = localChar:FindFirstChild("HumanoidRootPart")
+                                if origin and myHrp and (origin - myHrp.Position).Magnitude < 10 then
+                                    args[2] = (target.Position - origin).Unit * 3000
+                                    return oldNamecall(self, unpack(args))
+                                end
+                            else
+                                local ray = args[1]
+                                if typeof(ray) == "Ray" then
+                                    local myHrp = localChar:FindFirstChild("HumanoidRootPart")
+                                    if ray.Origin and myHrp and (ray.Origin - myHrp.Position).Magnitude < 10 then
+                                        args[1] = Ray.new(ray.Origin, (target.Position - ray.Origin).Unit * 3000)
+                                        return oldNamecall(self, unpack(args))
+                                    end
+                                end
+                            end
+                        end
                     end
                 end
             end
@@ -262,15 +283,28 @@ if hookmetamethod then
 elseif hookfunction then
     local oldRaycast = Workspace.Raycast
     oldNamecall = hookfunction(oldRaycast, function(self, ...)
-        if state.silentAim and hasTool("gun") and not checkcaller() then
-            local murderer = getMurderer()
-            if murderer and murderer.Character then
-                local target = murderer.Character:FindFirstChild("Head") or murderer.Character:FindFirstChild("HumanoidRootPart")
-                if target then
+        if state.silentAim then
+            local localChar = LocalPlayer.Character
+            if localChar then
+                local hasGun = false
+                for _, t in ipairs(localChar:GetChildren()) do
+                    if t:IsA("Tool") and t.Name:lower():match("gun") then hasGun = true break end
+                end
+                
+                if hasGun and not checkcaller() then
                     local args = {...}
                     local origin = args[1]
-                    args[2] = (target.Position - origin).Unit * 3000
-                    return oldRaycast(self, unpack(args))
+                    local myHrp = localChar:FindFirstChild("HumanoidRootPart")
+                    if origin and myHrp and (origin - myHrp.Position).Magnitude < 10 then
+                        local murderer = getMurdererOptimized()
+                        if murderer and murderer.Character then
+                            local target = murderer.Character:FindFirstChild("Head") or murderer.Character:FindFirstChild("HumanoidRootPart")
+                            if target then
+                                args[2] = (target.Position - origin).Unit * 3000
+                                return oldRaycast(self, unpack(args))
+                            end
+                        end
+                    end
                 end
             end
         end
@@ -553,7 +587,6 @@ FloatBtn.Parent = ScreenGui
 corner(FloatBtn, 25)
 local floatStroke = stroke(FloatBtn, ACCENT, 1.5, 0.2)
 
--- float glow
 local FloatGlow = Instance.new("Frame")
 FloatGlow.Name = randomName()
 FloatGlow.Size = UDim2.new(1, 20, 1, 20)
@@ -565,7 +598,6 @@ FloatGlow.Visible = false
 FloatGlow.Parent = FloatBtn
 corner(FloatGlow, 30)
 
--- drag float button
 do
     local dragging, dragStart, startPos
     FloatBtn.InputBegan:Connect(function(input)
@@ -698,7 +730,6 @@ Main.Parent = ScreenGui
 corner(Main, 12)
 stroke(Main, ACCENT_DIM, 1, 0.1)
 
--- drag main
 do
     local dragging, dragStart, startPos
     Main.InputBegan:Connect(function(input)
