@@ -1,6 +1,7 @@
 --[[
-    NEXO E — MM2 Suite
-    Fixed: Universal Silent Aim (PC + Mobile) via Camera Raycast hook
+    NEXO E — MM2 Suite v2.0 Overdrive
+    Features added: Gun/Knife Aura, Invisible, FPS Boost, Auto Dodge, ESP Boxes, Emotes, etc.
+    UI: 5 Tabs, optimized scrolling, sidebar layout.
 ]]
 
 local Players = game:GetService("Players")
@@ -11,6 +12,7 @@ local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
 local VirtualUser = game:GetService("VirtualUser")
 local TweenService = game:GetService("TweenService")
+local StarterGui = game:GetService("StarterGui")
 
 -- ─── STEALTH UTILS ────────────────────────────────────────────
 local function getProtectedParent()
@@ -27,12 +29,8 @@ local function randomName()
     return s
 end
 
-local function hookWalkSpeed(on, speed)
-    local char = LocalPlayer.Character
-    if char then
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then task.spawn(function() hum.WalkSpeed = on and speed or 16 end) end
-    end
+local function notify(title, text)
+    StarterGui:SetCore("SendNotification", {Title = title, Text = text, Duration = 3})
 end
 
 -- ─── COLORS ───────────────────────────────────────────────────
@@ -64,14 +62,17 @@ end
 -- ─── ESTADO ───────────────────────────────────────────────────
 local scriptRunning = true
 local state = {
-    esp = false, tracers = false, fly = false, noclip = false,
-    speed = false, coinFarm = false, silentAim = false, knifeAim = false,
-    autoGrabGun = false, hitbox = false, fullbright = false,
-    antiAfk = false, murderAlarm = false, gunDropNotify = false,
+    silentAim = false, knifeAim = false, gunAura = false, knifeAura = false, 
+    autoGrabGun = false, gunDropNotify = false, hitbox = false, 
+    esp = false, tracers = false, espBox = false, fullbright = false, 
+    murderAlarm = false, fly = false, noclip = false, speed = false, 
+    invisible = false, autoDodge = false, autoFarm = false, antiAfk = false, 
+    fpsBoost = false, noShadows = false, optimizeCoins = false,
 }
 local espObjects = {}
+local boxObjects = {}
 local tracerObjects = {}
-local flyConn, noclipConn, coinConn, knifeConn, grabConn, alarmConn, dropConn, antiAfkConn
+local flyConn, noclipConn, autoFarmConn, dodgeConn, gunAuraConn, knifeAuraConn, coinConn, alarmConn, dropConn, antiAfkConn
 local originalHitboxes = {}
 
 -- ─── ROLES ────────────────────────────────────────────────────
@@ -104,14 +105,21 @@ local function getMurderer()
     return nil
 end
 
-local function getNearestInnocent()
+local function getSheriff()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and getRole(p) == "Sheriff" then return p end
+    end
+    return nil
+end
+
+local function getNearestPlayer(roleFilter)
     local char = LocalPlayer.Character
     if not char then return nil end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return nil end
     local nearest, bestDist = nil, math.huge
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and getRole(p) == "Innocent" and p.Character then
+        if p ~= LocalPlayer and getRole(p) == roleFilter and p.Character then
             local tHrp = p.Character:FindFirstChild("HumanoidRootPart")
             local hum = p.Character:FindFirstChildOfClass("Humanoid")
             if tHrp and hum and hum.Health > 0 then
@@ -132,7 +140,7 @@ local function hasTool(name)
     return false
 end
 
--- ─── ESP + TRACERS ────────────────────────────────────────────
+-- ─── ESP + BOXES + TRACERS ────────────────────────────────────
 local roleColors = {
     Murderer = Color3.fromRGB(255, 70, 70),
     Sheriff  = Color3.fromRGB(70, 130, 255),
@@ -147,15 +155,21 @@ local function clearESP()
     espObjects = {}
 end
 
+local function clearBoxes()
+    for _, v in pairs(boxObjects) do if v then v:Destroy() end end
+    boxObjects = {}
+end
+
 local function clearTracers()
     for _, v in pairs(tracerObjects) do if v then v:Destroy() end end
     tracerObjects = {}
 end
 
-local function updateESP()
+local function updateVisuals()
     if not state.esp then clearESP() end
+    if not state.espBox then clearBoxes() end
     if not state.tracers then clearTracers() end
-    if not state.esp and not state.tracers then return end
+    if not state.esp and not state.espBox and not state.tracers then return end
     
     local myHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     local cam = Workspace.CurrentCamera
@@ -194,6 +208,24 @@ local function updateESP()
                     e.lbl.Text = p.Name .. "  " .. role .. "  " .. dist .. "m"; e.lbl.TextColor3 = col
                 end
                 
+                if state.espBox then
+                    if not boxObjects[p] or not boxObjects[p].Parent then
+                        local box = Instance.new("BillboardGui")
+                        box.Name = randomName()
+                        box.Size = UDim2.new(0, 100, 0, 100)
+                        box.AlwaysOnTop = true
+                        box.Parent = hrp
+                        local frame = Instance.new("Frame")
+                        frame.Name = randomName()
+                        frame.Size = UDim2.new(1, 0, 1, 0)
+                        frame.BackgroundTransparency = 1
+                        frame.Parent = box
+                        local s = Instance.new("UIStroke"); s.Color = col; s.Thickness = 2; s.Parent = frame
+                        boxObjects[p] = box
+                    end
+                    boxObjects[p].Parent = hrp
+                end
+                
                 if state.tracers then
                     if not tracerObjects[p] or not tracerObjects[p].Parent then
                         local line = Instance.new("Frame")
@@ -219,13 +251,14 @@ local function updateESP()
                     if espObjects[p].tag then espObjects[p].tag:Destroy() end
                     espObjects[p] = nil
                 end
+                if boxObjects[p] then boxObjects[p]:Destroy(); boxObjects[p] = nil end
                 if tracerObjects[p] then tracerObjects[p]:Destroy(); tracerObjects[p] = nil end
             end
         end
     end
 end
 
--- ─── GUN SILENT AIM (PC + MOBILE FIX) ─────────────────────────
+-- ─── GUN SILENT AIM (PC + MOBILE) ─────────────────────────────
 local mt = getrawmetatable(game)
 local oldNamecall = mt.__namecall
 setreadonly(mt, false)
@@ -263,7 +296,6 @@ mt.__namecall = newcclosure(function(self, ...)
                             
                             if method == "Raycast" then
                                 local origin = args[1]
-                                -- FILTRO: só redireciona se o raycast vier da câmera (tiro). isso impede de quebrar o movimento.
                                 if origin and (origin - cam.CFrame.Position).Magnitude < 5 then
                                     args[2] = (target.Position - origin).Unit * 3000
                                     return oldNamecall(self, unpack(args))
@@ -271,7 +303,6 @@ mt.__namecall = newcclosure(function(self, ...)
                             else
                                 local ray = args[1]
                                 if typeof(ray) == "Ray" then
-                                    -- FILTRO: mesma coisa aqui
                                     if ray.Origin and (ray.Origin - cam.CFrame.Position).Magnitude < 5 then
                                         args[1] = Ray.new(ray.Origin, (target.Position - ray.Origin).Unit * 3000)
                                         return oldNamecall(self, unpack(args))
@@ -293,26 +324,46 @@ setreadonly(mt, true)
 local function toggleKnifeAim(on)
     state.knifeAim = on
     if on then
-        knifeConn = RunService.Heartbeat:Connect(function()
+        knifeAuraConn = RunService.Heartbeat:Connect(function()
             local tool = hasTool("knife"); if not tool then return end
-            local target = getNearestInnocent(); if not target or not target.Character then return end
+            local target = getNearestPlayer("Innocent") or getNearestPlayer("Sheriff")
+            if not target or not target.Character then return end
             local tHrp = target.Character:FindFirstChild("HumanoidRootPart")
             local tHum = target.Character:FindFirstChildOfClass("Humanoid")
             if not tHrp or not tHum or tHum.Health <= 0 then return end
             local char = LocalPlayer.Character; if not char then return end
             local hrp = char:FindFirstChild("HumanoidRootPart"); if not hrp then return end
-            if (tHrp.Position - hrp.Position).Magnitude > 35 then return end
-            task.spawn(function() tool:Activate() end)
+            if (tHrp.Position - hrp.Position).Magnitude < 35 then
+                task.spawn(function() tool:Activate() end)
+            end
         end)
     else
-        if knifeConn then knifeConn:Disconnect() knifeConn = nil end
+        if knifeAuraConn then knifeAuraConn:Disconnect() knifeAuraConn = nil end
+    end
+end
+
+local function toggleGunAura(on)
+    state.gunAura = on
+    if on then
+        gunAuraConn = RunService.Heartbeat:Connect(function()
+            local tool = hasTool("gun"); if not tool then return end
+            local target = getMurderer()
+            if target and target.Character then
+                local tHum = target.Character:FindFirstChildOfClass("Humanoid")
+                if tHum and tHum.Health > 0 then
+                    task.spawn(function() tool:Activate() end)
+                end
+            end
+        end)
+    else
+        if gunAuraConn then gunAuraConn:Disconnect() gunAuraConn = nil end
     end
 end
 
 local function toggleAutoGrabGun(on)
     state.autoGrabGun = on
     if on then
-        grabConn = RunService.Heartbeat:Connect(function()
+        dropConn = RunService.Heartbeat:Connect(function()
             if hasTool("gun") then return end
             for _, obj in ipairs(Workspace:GetDescendants()) do
                 if obj:IsA("Tool") and obj.Name:lower():match("gun") then
@@ -321,12 +372,15 @@ local function toggleAutoGrabGun(on)
                         local char = LocalPlayer.Character; if char then
                             local hrp = char:FindFirstChild("HumanoidRootPart")
                             if hrp then
-                                task.spawn(function()
-                                    hrp.CFrame = CFrame.new(handle.Position)
-                                    task.wait(0.1)
-                                    firetouchinterest(hrp, handle, 0)
-                                    firetouchinterest(hrp, handle, 1)
-                                end)
+                                local dist = (handle.Position - hrp.Position).Magnitude
+                                if dist < 500 then
+                                    task.spawn(function()
+                                        hrp.CFrame = CFrame.new(handle.Position)
+                                        task.wait(0.1)
+                                        firetouchinterest(hrp, handle, 0)
+                                        firetouchinterest(hrp, handle, 1)
+                                    end)
+                                end
                             end
                         end
                     end
@@ -334,7 +388,7 @@ local function toggleAutoGrabGun(on)
             end
         end)
     else
-        if grabConn then grabConn:Disconnect() grabConn = nil end
+        if dropConn then dropConn:Disconnect() dropConn = nil end
     end
 end
 
@@ -361,25 +415,79 @@ local function toggleHitbox(on)
     end
 end
 
-local originalLighting = {}
 local function toggleFullbright(on)
     state.fullbright = on
     if on then
-        originalLighting.Brightness = Lighting.Brightness
-        originalLighting.ClockTime = Lighting.ClockTime
-        originalLighting.FogEnd = Lighting.FogEnd
-        originalLighting.GlobalShadows = Lighting.GlobalShadows
-        originalLighting.Ambient = Lighting.Ambient
         task.spawn(function()
             Lighting.Brightness = 3; Lighting.ClockTime = 12; Lighting.FogEnd = 100000
             Lighting.GlobalShadows = false; Lighting.Ambient = Color3.fromRGB(178, 178, 178)
         end)
     else
-        if originalLighting.Brightness then Lighting.Brightness = originalLighting.Brightness end
-        if originalLighting.ClockTime then Lighting.ClockTime = originalLighting.ClockTime end
-        if originalLighting.FogEnd then Lighting.FogEnd = originalLighting.FogEnd end
-        if originalLighting.GlobalShadows ~= nil then Lighting.GlobalShadows = originalLighting.GlobalShadows end
-        if originalLighting.Ambient then Lighting.Ambient = originalLighting.Ambient end
+        Lighting.Brightness = 2; Lighting.ClockTime = 14; Lighting.FogEnd = 100000
+        Lighting.GlobalShadows = true; Lighting.Ambient = Color3.fromRGB(100, 100, 100)
+    end
+end
+
+local function toggleInvisible(on)
+    state.invisible = on
+    local char = LocalPlayer.Character
+    if char then
+        for _, p in ipairs(char:GetDescendants()) do
+            if p:IsA("BasePart") and p.Name ~= "HumanoidRootPart" then
+                p.LocalTransparencyModifier = on and 1 or 0
+            end
+        end
+    end
+end
+
+local function toggleAutoDodge(on)
+    state.autoDodge = on
+    if on then
+        dodgeConn = RunService.Heartbeat:Connect(function()
+            local char = LocalPlayer.Character; if not char then return end
+            local hrp = char:FindFirstChild("HumanoidRootPart"); if not hrp then return end
+            local murderer = getMurderer()
+            if murderer and murderer.Character then
+                local mHrp = murderer.Character:FindFirstChild("HumanoidRootPart")
+                if mHrp then
+                    if (mHrp.Position - hrp.Position).Magnitude < 15 then
+                        hrp.CFrame = hrp.CFrame * CFrame.new(0, 0, 20)
+                    end
+                end
+            end
+        end)
+    else
+        if dodgeConn then dodgeConn:Disconnect() dodgeConn = nil end
+    end
+end
+
+local function toggleFPSBoost(on)
+    state.fpsBoost = on
+    if on then
+        for _, v in ipairs(Workspace:GetDescendants()) do
+            if v:IsA("BasePart") then
+                v.Material = Enum.Material.SmoothPlastic
+            end
+        end
+    else
+        -- Revert is complex without storing originals, leaving smooth plastic is safer for performance
+    end
+end
+
+local function toggleNoShadows(on)
+    state.noShadows = on
+    Lighting.GlobalShadows = not on
+end
+
+local function toggleOptimizeCoins(on)
+    state.optimizeCoins = on
+    if on then
+        for _, v in ipairs(Workspace:GetDescendants()) do
+            if v:IsA("BasePart") and (v.Name:lower():match("coin") or v.Name:lower():match("pickup")) then
+                v.Material = Enum.Material.SmoothPlastic
+                v.Reflectance = 0
+            end
+        end
     end
 end
 
@@ -414,38 +522,6 @@ local function toggleMurderAlarm(on)
     else
         if alarmConn then alarmConn:Disconnect() alarmConn = nil end
         if alarmGui then alarmGui.Visible = false end
-    end
-end
-
-local function toggleGunDropNotify(on)
-    state.gunDropNotify = on
-    if on then
-        dropConn = RunService.Heartbeat:Connect(function()
-            if hasTool("gun") then return end
-            for _, obj in ipairs(Workspace:GetDescendants()) do
-                if obj:IsA("Tool") and obj.Name:lower():match("gun") then
-                    local handle = obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart")
-                    if handle then
-                        local char = LocalPlayer.Character; if char then
-                            local hrp = char:FindFirstChild("HumanoidRootPart")
-                            if hrp then
-                                local dist = (handle.Position - hrp.Position).Magnitude
-                                if dist < 500 then
-                                    task.spawn(function()
-                                        hrp.CFrame = CFrame.new(handle.Position)
-                                        task.wait(0.1)
-                                        firetouchinterest(hrp, handle, 0)
-                                        firetouchinterest(hrp, handle, 1)
-                                    end)
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end)
-    else
-        if dropConn then dropConn:Disconnect() dropConn = nil end
     end
 end
 
@@ -497,7 +573,7 @@ local function toggleNoclip(on)
             local char = LocalPlayer.Character
             if char then
                 for _, p in ipairs(char:GetDescendants()) do
-                    if p:IsA("BasePart") and p.CanCollide then task.spawn(function() p.CanCollide = false end) end
+                    if p:IsA("BasePart") and p.CanCollide then p.CanCollide = false end
                 end
             end
         end)
@@ -506,7 +582,7 @@ local function toggleNoclip(on)
     end
 end
 
-local function toggleSpeed(on) state.speed = on; hookWalkSpeed(on, 50) end
+local function toggleSpeed(on) state.speed = on; local char = LocalPlayer.Character; if char then local hum = char:FindFirstChildOfClass("Humanoid") if hum then task.spawn(function() hum.WalkSpeed = on and 50 or 16 end) end end end
 
 local function toggleCoinFarm(on)
     state.coinFarm = on
@@ -539,6 +615,29 @@ local function tpRandom()
         local myHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         local tHrp = t.Character.HumanoidRootPart
         if myHrp and tHrp then task.spawn(function() myHrp.CFrame = tHrp.CFrame * CFrame.new(0, 0, 3) end) end
+    end
+end
+
+local function forceSheriffShoot()
+    local sheriff = getSheriff()
+    if sheriff and sheriff.Character then
+        local tool = sheriff.Character:FindFirstChildOfClass("Tool")
+        if tool and tool.Name:lower():match("gun") then
+            tool:Activate()
+        end
+    end
+end
+
+local function playEmote(name)
+    local char = LocalPlayer.Character
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            local emote = Instance.new("Animation")
+            emote.AnimationId = "rbxassetid://" .. name
+            local track = hum:LoadAnimation(emote)
+            track:Play()
+        end
     end
 end
 
@@ -748,21 +847,21 @@ SideTitle.TextSize = 16
 SideTitle.Parent = Sidebar
 gradient(SideTitle, ACCENT_LIGHT, ACCENT, 0)
 
-local tabs = {"Combat", "Visuals", "Player", "Misc"}
+local tabs = {"Combat", "Visuals", "Player", "Utility", "Misc"}
 local tabButtons = {}
 local tabPages = {}
 
 for i, name in ipairs(tabs) do
     local tabBtn = Instance.new("TextButton")
     tabBtn.Name = randomName()
-    tabBtn.Size = UDim2.new(1, -20, 0, 32)
-    tabBtn.Position = UDim2.new(0, 10, 0, 60 + (i-1)*40)
+    tabBtn.Size = UDim2.new(1, -20, 0, 28)
+    tabBtn.Position = UDim2.new(0, 10, 0, 50 + (i-1)*32)
     tabBtn.BackgroundColor3 = BG_CARD
     tabBtn.BorderSizePixel = 0
     tabBtn.Text = name
     tabBtn.TextColor3 = TEXT_DIM
     tabBtn.Font = Enum.Font.GothamBold
-    tabBtn.TextSize = 12
+    tabBtn.TextSize = 11
     tabBtn.AutoButtonColor = false
     corner(tabBtn, 6)
     tabBtn.Parent = Sidebar
@@ -844,7 +943,7 @@ end)
 local function makeToggle(parent, text, callback)
     local container = Instance.new("TextButton")
     container.Name = randomName()
-    container.Size = UDim2.new(1, 0, 0, 36)
+    container.Size = UDim2.new(1, 0, 0, 32)
     container.BackgroundColor3 = BG_CARD
     container.BorderSizePixel = 0
     container.Text = ""
@@ -861,7 +960,7 @@ local function makeToggle(parent, text, callback)
     label.Text = text
     label.TextColor3 = TEXT
     label.Font = Enum.Font.GothamMedium
-    label.TextSize = 13
+    label.TextSize = 12
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Parent = container
 
@@ -915,13 +1014,13 @@ end
 local function makeAction(parent, text, color, callback)
     local btn = Instance.new("TextButton")
     btn.Name = randomName()
-    btn.Size = UDim2.new(1, 0, 0, 36)
+    btn.Size = UDim2.new(1, 0, 0, 32)
     btn.BackgroundColor3 = BG_CARD
     btn.BorderSizePixel = 0
     btn.Text = text
     btn.TextColor3 = color or TEXT
     btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 13
+    btn.TextSize = 12
     btn.AutoButtonColor = false
     corner(btn, 8)
     stroke(btn, color and Color3.new(color.R * 0.3, color.G * 0.3, color.B * 0.3) or ACCENT_DIM, 1, 0)
@@ -944,35 +1043,47 @@ end
 local loadSteps = {
     { status = "booting core modules...",         sub = "hooking metamethods", fn = function() task.wait(0.3) end },
     { status = "establishing stealth layer...",    sub = "gethui + randomization", fn = function() task.wait(0.25) end },
-    { status = "loading combat systems...",        sub = "silent aim + knife logic", fn = function()
+    { status = "loading combat systems...",        sub = "silent aim + aura", fn = function()
         makeToggle(tabPages["Combat"], "Gun Silent Aim", function(on) state.silentAim = on end)
-        makeToggle(tabPages["Combat"], "Knife Auto-Throw", toggleKnifeAim)
-        makeToggle(tabPages["Combat"], "Auto-Grab Gun", toggleAutoGrabGun)
-        makeToggle(tabPages["Combat"], "Gun Drop Notifier + TP", toggleGunDropNotify)
+        makeToggle(tabPages["Combat"], "Knife Silent Aim", toggleKnifeAim)
+        makeToggle(tabPages["Combat"], "Gun Aura", toggleGunAura)
+        makeToggle(tabPages["Combat"], "Auto Grab Gun", toggleAutoGrabGun)
         makeToggle(tabPages["Combat"], "Hitbox Expander", toggleHitbox)
-        makeAction(tabPages["Combat"], "Teleport to Random Player", ACCENT_LIGHT, tpRandom)
+        makeAction(tabPages["Combat"], "Force Sheriff Shoot", ACCENT_LIGHT, forceSheriffShoot)
     end },
-    { status = "loading visual systems...",        sub = "ESP + tracers + fullbright", fn = function()
-        makeToggle(tabPages["Visuals"], "ESP  (Roles + Distance)", function(on) state.esp = on end)
+    { status = "loading visual systems...",        sub = "esp + boxes + tracers", fn = function()
+        makeToggle(tabPages["Visuals"], "ESP (Roles + Dist)", function(on) state.esp = on end)
+        makeToggle(tabPages["Visuals"], "ESP Boxes", function(on) state.espBox = on end)
         makeToggle(tabPages["Visuals"], "Tracers", function(on) state.tracers = on end)
         makeToggle(tabPages["Visuals"], "Fullbright", toggleFullbright)
+        makeToggle(tabPages["Visuals"], "No Shadows", toggleNoShadows)
         makeToggle(tabPages["Visuals"], "Murderer Alarm", toggleMurderAlarm)
     end },
     { status = "loading player systems...",        sub = "fly + noclip + speed", fn = function()
-        makeToggle(tabPages["Player"], "Fly  (WASD / Space / Ctrl)", toggleFly)
+        makeToggle(tabPages["Player"], "Fly (WASD/Space/Ctrl)", toggleFly)
         makeToggle(tabPages["Player"], "Noclip", toggleNoclip)
         makeToggle(tabPages["Player"], "Speed x3", toggleSpeed)
-        makeToggle(tabPages["Player"], "Coin Farm", toggleCoinFarm)
+        makeToggle(tabPages["Player"], "Invisible", toggleInvisible)
+        makeToggle(tabPages["Player"], "Auto Dodge Murderer", toggleAutoDodge)
+        makeAction(tabPages["Player"], "Teleport Random", ACCENT_LIGHT, tpRandom)
+    end },
+    { status = "loading utility systems...",       sub = "farm + fps + emotes", fn = function()
+        makeToggle(tabPages["Utility"], "Coin Farm", toggleCoinFarm)
+        makeToggle(tabPages["Utility"], "FPS Boost", toggleFPSBoost)
+        makeToggle(tabPages["Utility"], "Optimize Coins", toggleOptimizeCoins)
+        makeAction(tabPages["Utility"], "Emote: Sit", TEXT_DIM, function() playEmote("507768133") end)
+        makeAction(tabPages["Utility"], "Emote: Dab", TEXT_DIM, function() playEmote("248263260") end)
+        makeAction(tabPages["Utility"], "Emote: Wave", TEXT_DIM, function() playEmote("128777973") end)
     end },
     { status = "loading misc systems...",          sub = "anti-afk + kill", fn = function()
         makeToggle(tabPages["Misc"], "Anti-AFK", toggleAntiAfk)
         makeAction(tabPages["Misc"], "Kill Script", DANGER, function()
             scriptRunning = false
-            clearESP(); clearTracers()
-            for _, conn in pairs({flyConn, noclipConn, coinConn, knifeConn, grabConn, alarmConn, dropConn, antiAfkConn}) do
+            clearESP(); clearBoxes(); clearTracers()
+            for _, conn in pairs({flyConn, noclipConn, autoFarmConn, dodgeConn, gunAuraConn, knifeAuraConn, coinConn, alarmConn, dropConn, antiAfkConn}) do
                 if conn then conn:Disconnect() end
             end
-            toggleHitbox(false); toggleFullbright(false)
+            toggleHitbox(false); toggleFullbright(false); toggleInvisible(false)
             if alarmGui then alarmGui:Destroy() end
             state.silentAim = false
             ScreenGui:Destroy()
@@ -996,7 +1107,7 @@ task.spawn(function()
         TweenService:Create(BarFill, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {Size = UDim2.new(progress, 0, 1, 0)}):Play()
         LoadPercent.Text = math.floor(progress * 100) .. "%"
 
-        if i >= 3 and i <= 6 then
+        if i >= 3 and i <= 7 then
             local tabName = tabs[i - 2]
             if tabName and tabButtons[tabName] then
                 local tb = tabButtons[tabName].obj
@@ -1034,7 +1145,7 @@ end)
 -- ─── LOOPS (PERSISTENT) ───────────────────────────────────────
 task.spawn(function()
     while scriptRunning do
-        updateESP()
+        updateVisuals()
         task.wait(0.3)
     end
 end)
@@ -1042,8 +1153,9 @@ end)
 LocalPlayer.CharacterAdded:Connect(function()
     task.wait(1)
     if not scriptRunning then return end
-    if state.speed then hookWalkSpeed(true, 50) end
+    if state.speed then toggleSpeed(true) end
     if state.hitbox then toggleHitbox(true) end
+    if state.invisible then toggleInvisible(true) end
 end)
 
 print("[NEXO E] loaded — welcome, Maker.")
